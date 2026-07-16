@@ -11,7 +11,18 @@ body {
   @apply text-stone-900 antialiased;
   background-color: #faf6f0; /* 冷たいグレーではなく、温かみのあるクリーム地 */
   overflow-x: hidden;
-  font-family: var(--font-zen-maru), "Hiragino Maru Gothic ProN", "Hiragino Sans", sans-serif;
+  /* 問題文を長時間読むアプリのため、丸文字系の装飾フォントではなく各OS標準の
+     読みやすいゴシック体を使う（Windows/Mac/Android/iOSそれぞれの既定フォント） */
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "Hiragino Kaku Gothic ProN",
+    "Hiragino Sans",
+    "Yu Gothic",
+    "YuGothic",
+    "Segoe UI",
+    Meiryo,
+    sans-serif;
 }
 
 /* カード等の柔らかい影。既定のshadowユーティリティより広く淡く、温かい色みに寄せている */
