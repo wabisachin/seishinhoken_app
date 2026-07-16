@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getModel } from "./llm";
 import { supabase } from "./supabase";
 import { retrieveForItem, RetrievedChunk, TaxonomyItem } from "./retrieval";
-import { DEFAULT_LLM, LlmSettings } from "./types";
+import { getLlmSettings } from "./appSettings";
 
 // 構造化出力スキーマ（プロバイダ非対応の制約は避け、後段で手動検証する）
 // フィールド順序が生成順序に対応するため、必ず「各選択肢の正誤を吟味(explanations)」→
@@ -38,6 +38,50 @@ function chunkBlock(chunks: RetrievedChunk[]): string {
     .join("\n\n");
 }
 
+/**
+ * 出題対象のタクソノミー項目を選ぶ。既存問題（active/rejected問わず）が
+ * 最も少ない項目群からランダムに選ぶことで、200問に達するまでの間、
+ * 特定の項目に偏らず出題基準全体をまんべんなくカバーする。
+ */
+async function pickTaxonomyItem(subject: string): Promise<TaxonomyItem> {
+  const sb = supabase();
+  const { data: items, error } = await sb
+    .from("taxonomy")
+    .select("id, subject, major, middle, minor")
+    .eq("subject", subject);
+  if (error || !items || items.length === 0) {
+    throw new Error(`taxonomy not found for subject=${subject}（extract_kijun.py 実行済みか確認）`);
+  }
+  const { data: existing } = await sb.from("questions").select("taxonomy_id").eq("subject", subject);
+  const countByItem = new Map<number, number>();
+  for (const row of existing ?? []) {
+    if (row.taxonomy_id == null) continue;
+    countByItem.set(row.taxonomy_id, (countByItem.get(row.taxonomy_id) ?? 0) + 1);
+  }
+  const withCounts = items.map((it) => ({ item: it as TaxonomyItem, count: countByItem.get(it.id) ?? 0 }));
+  const minCount = Math.min(...withCounts.map((w) => w.count));
+  const leastCovered = withCounts.filter((w) => w.count === minCount);
+  return leastCovered[Math.floor(Math.random() * leastCovered.length)].item;
+}
+
+/** 同じ出題基準項目で既に作られた問題文と、根拠として使用済みの抜粋（重複回避の材料） */
+async function existingCoverage(taxonomyId: number, limit = 15) {
+  const { data } = await supabase()
+    .from("questions")
+    .select("stem, citations")
+    .eq("taxonomy_id", taxonomyId)
+    .order("id", { ascending: false })
+    .limit(limit);
+  const stems = (data ?? []).map((q) => q.stem as string);
+  const excerpts = new Set<string>();
+  for (const q of data ?? []) {
+    for (const c of (q.citations as { excerpt?: string }[] | null) ?? []) {
+      if (c.excerpt) excerpts.add(c.excerpt.slice(0, 150));
+    }
+  }
+  return { stems, excerpts: [...excerpts] };
+}
+
 async function fewShotExamples(subject: string, n = 3): Promise<string> {
   const { data } = await supabase()
     .from("past_questions")
@@ -64,30 +108,28 @@ export type GenerateResult = {
   problems?: string[];
 };
 
-/** 指定科目からタクソノミー項目を1つ選んで問題を1問生成・検証・保存する */
-export async function generateOneQuestion(
-  subject: string,
-  llm?: Partial<LlmSettings>,
-): Promise<GenerateResult> {
+/**
+ * 指定科目からタクソノミー項目を1つ選んで問題を1問生成・検証・保存する。
+ * 使用するLLMはapp_settings（管理者のみ変更可）で決まる。クライアントから
+ * 指定させる経路は無い ── これを崩すと「ユーザーが勝手にモデルを変更できる」
+ * ことになり、管理者専用にする要件そのものが破られるため、ここに引数を
+ * 増やして呼び出し元から渡させるようなことは絶対にしないこと。
+ */
+export async function generateOneQuestion(subject: string): Promise<GenerateResult> {
   const sb = supabase();
+  const llm = await getLlmSettings();
 
-  // 1. 出題対象のタクソノミー項目をランダム選択
-  const { data: items, error: taxError } = await sb
-    .from("taxonomy")
-    .select("id, subject, major, middle, minor")
-    .eq("subject", subject);
-  if (taxError || !items || items.length === 0) {
-    throw new Error(`taxonomy not found for subject=${subject}（extract_kijun.py 実行済みか確認）`);
-  }
-  const item = items[Math.floor(Math.random() * items.length)] as TaxonomyItem;
+  // 1. 出題対象のタクソノミー項目を選択（既存問題が少ない項目を優先）
+  const item = await pickTaxonomyItem(subject);
   const topic = [item.major, item.middle, item.minor].filter(Boolean).join(" > ");
 
   // 2. HyDE検索で根拠チャンク+周辺チャンクを取得
   const { main, neighbor } = await retrieveForItem(item, llm);
   if (main.length === 0) throw new Error("チャンク検索結果が空です（埋め込み投入済みか確認）");
 
-  // 3. few-shot（同科目の実際の過去問）
+  // 3. few-shot（同科目の実際の過去問）＋この項目で既出の問題・根拠抜粋（重複回避用）
   const fewShot = await fewShotExamples(subject);
+  const { stems: pastStems, excerpts: pastExcerpts } = await existingCoverage(item.id);
 
   const basePrompt = `あなたは精神保健福祉士国家試験の作問委員です。教科書の記述のみを根拠に、本番と同水準の問題を1問作成してください。
 
@@ -104,6 +146,12 @@ ${chunkBlock(neighbor)}
 # 実際の過去問の文体・形式（これに厳密に合わせる）
 ${fewShot}
 
+# この項目で既に出題済みの問題文（重複厳禁。同じ論点の焼き直しをせず、根拠テキストの別の側面・別の記述を使うこと）
+${pastStems.length ? pastStems.map((s, i) => `${i + 1}. ${s}`).join("\n") : "（まだ無し）"}
+
+# 既に根拠として使用済みの抜粋（できるだけ避け、根拠テキストの別の部分を使うこと）
+${pastExcerpts.length ? pastExcerpts.map((e, i) => `${i + 1}. ${e}...`).join("\n") : "（まだ無し）"}
+
 # 作問ルール
 - 問題形式: 五肢択一（correct 1つ）または五肢択二（correct 2つ、問題文に「2つ選びなさい」と明記）。事例問題にしてもよい
 - 正答は根拠テキストの記述から明確に導けること。根拠テキストに無い事実を使わない
@@ -119,7 +167,7 @@ ${fewShot}
 - citation_chunk_ids には実際に根拠として使ったチャンクのid（整数）を入れる`;
 
   const model = getModel(llm);
-  const modelName = llm?.model ?? DEFAULT_LLM.model;
+  const modelName = llm.model;
 
   let lastProblems: string[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {

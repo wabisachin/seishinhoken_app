@@ -4,7 +4,6 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import type { Mode, Question } from "@/lib/types";
-import { loadLlmSettings } from "@/lib/settings";
 
 type Phase = "setup" | "loading" | "answering" | "explaining" | "generating" | "stalled" | "finished";
 
@@ -14,26 +13,23 @@ type AnswerRecord = {
   isCorrect: boolean;
 };
 
-// 分野別モード（mode=subject）でのバックグラウンド生成待ちの設定
-const BUFFER_AHEAD = 2; // 現在の進捗より常にこの数だけ多く生成しておく目標
-const POLL_INTERVAL_MS = 2500;
-const POLL_TIMEOUT_MS = 90000; // これを超えて生成できなければ「生成中...」を諦めてエラー表示にする
+// 分野別モード（mode=subject）: 次の1問取得は毎回サーバー側で高々1回だけ生成を試みる
+// リクエスト駆動方式（lib/questionSupply.ts）。却下が続く場合のみ複数回叩く必要があるため、
+// UXの保険として呼び出し回数の上限だけクライアント側にも置く（コストの上限はサーバー側の行数判定）。
+const MAX_NEXT_ATTEMPTS = 15;
 
-async function ensureGenerationJob(subject: string, targetPool: number) {
-  const llm = loadLlmSettings();
-  await fetch("/api/generation/ensure", {
+async function requestNextQuestion(
+  subject: string,
+  excludeIds: number[],
+): Promise<{ question: Question | null; exhausted: boolean }> {
+  const res = await fetch("/api/quiz/next", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ subject, targetPool, llm }),
+    body: JSON.stringify({ subject, excludeIds }),
   });
-}
-
-async function fetchNextQuestion(subject: string, excludeIds: number[]): Promise<Question | null> {
-  const qs = new URLSearchParams({ subject, exclude: excludeIds.join(",") });
-  const res = await fetch(`/api/quiz/next?${qs}`);
   const d = await res.json();
   if (d.error) throw new Error(d.error);
-  return (d.question as Question | null) ?? null;
+  return { question: (d.question as Question | null) ?? null, exhausted: !!d.exhausted };
 }
 
 function QuizInner() {
@@ -66,35 +62,29 @@ function QuizInner() {
     };
   }, []);
 
-  /** 分野別モード: まだ見ていない問題を1問取得。無ければ生成完了までポーリングする */
+  /**
+   * 分野別モード: まだ見ていない問題を1問取得する。既存プールに無ければサーバーが
+   * その場で高々1回だけ生成を試みて返す（lib/questionSupply.ts）。却下が続く場合は
+   * こちらから複数回呼び直す必要があるため、UXの保険として回数の上限を設ける
+   * （コストの上限自体はサーバー側がquestionsテーブルの行数で判定済み）。
+   */
   const waitForNextSubjectQuestion = useCallback(
     async (excludeIds: number[]) => {
-      const wantAtLeast = Math.max(count, excludeIds.length + BUFFER_AHEAD);
-      await ensureGenerationJob(subject, wantAtLeast);
-      const started = Date.now();
       let announced = false;
-      while (!cancelledRef.current) {
-        const q = await fetchNextQuestion(subject, excludeIds);
-        if (q) return q;
+      for (let attempt = 0; attempt < MAX_NEXT_ATTEMPTS && !cancelledRef.current; attempt++) {
+        const { question, exhausted } = await requestNextQuestion(subject, excludeIds);
+        if (question) return question;
+        if (exhausted) {
+          throw new Error("この科目はこれ以上出題できる問題がありません（上限に達しました）。");
+        }
         if (!announced) {
           setPhase("generating");
           announced = true;
         }
-        if (Date.now() - started > POLL_TIMEOUT_MS) {
-          const statusRes = await fetch(`/api/generation/status?subject=${encodeURIComponent(subject)}`);
-          const status = await statusRes.json();
-          throw new Error(
-            status.last_error
-              ? `問題を生成できませんでした（${status.last_error}）`
-              : "問題の生成がタイムアウトしました。時間をおいて再度お試しください。",
-          );
-        }
-        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-        await ensureGenerationJob(subject, wantAtLeast); // 停止していたら再始動させる
       }
-      throw new Error("cancelled");
+      throw new Error("問題の生成に時間がかかりすぎています。時間をおいて再度お試しください。");
     },
-    [subject, count],
+    [subject],
   );
 
   const start = useCallback(async () => {
