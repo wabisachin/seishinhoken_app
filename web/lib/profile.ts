@@ -12,3 +12,7 @@ export function getStoredProfile(): UserProfile | null {
 export function setStoredProfile(p: UserProfile) {
   localStorage.setItem(KEY, p);
 }
+
+export function clearStoredProfile() {
+  localStorage.removeItem(KEY);
+}

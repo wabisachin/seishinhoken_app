@@ -1,5 +1,6 @@
 import Link from "next/link";
 import ProfileGate from "./ProfileGate";
+import ProfileBadge from "./ProfileBadge";
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -12,11 +13,12 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           <Link href="/" className="text-base font-bold leading-tight tracking-wide sm:text-lg">
             精神保健福祉士 試験対策
           </Link>
-          <div className="flex gap-5 text-sm font-medium text-indigo-50">
+          <div className="flex items-center gap-5 text-sm font-medium text-indigo-50">
             <Link href="/quiz" className="transition-colors hover:text-white">演習</Link>
             <Link href="/full-mock" className="transition-colors hover:text-white">本番模試</Link>
             <Link href="/stats" className="transition-colors hover:text-white">成績</Link>
             <Link href="/guide" className="transition-colors hover:text-white">使い方</Link>
+            <ProfileBadge />
           </div>
         </nav>
       </header>
