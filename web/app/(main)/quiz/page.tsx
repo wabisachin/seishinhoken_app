@@ -70,7 +70,11 @@ async function requestNextQuestion(
 }
 
 function QuizInner({ mode }: { mode: Mode }) {
-  const [phase, setPhase] = useState<Phase>(mode === "subject" ? "resume-prompt" : "setup");
+  // 分野別モードは「前回セッションがあるか」をマウント後のeffectで判定してから
+  // resume-promptかsetupに遷移する。判定が終わるまでの初期値は必ず何か表示される
+  // phaseにしておく（resume-promptはpendingResumeが無いと何も描画しないため、
+  // 初期値に使うとハイドレーション完了までの一瞬〜稀に長時間、画面が真っ暗に見える）。
+  const [phase, setPhase] = useState<Phase>(mode === "subject" ? "loading" : "setup");
   const [subjects, setSubjects] = useState<{ subject: string; taxonomy_items: number; kind: string | null }[]>([]);
   const [subject, setSubject] = useState("");
   const [count, setCount] = useState(10);
