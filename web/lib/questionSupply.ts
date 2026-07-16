@@ -39,23 +39,29 @@ async function fetchUnseenActive(subject: string, excludeIds: number[]): Promise
 /**
  * 新規生成もせず、今回のセッションで未出題の問題も無くなった場合の再出題用。
  * 「上限に達した＝新規が出ないだけで、既出の問題が出るだけ」という仕様を守るため、
- * 除外リストは無視してプールから1問返す（可能ならavoidIdだけは避けて連続repeatを防ぐ）。
- * これが null を返すのは、その科目にactiveな問題が1問も無い場合のみ
+ * セッション内の除外は無視してプールから選ぶ。出題回数（attempts数）が最も少ない
+ * 問題を優先し、同率の場合はランダムに選ぶ（特定の1問ばかり繰り返さないため）。
+ * null になるのは、その科目にactiveな問題が1問も無い場合のみ
  * （＝本当の意味での「出題できる問題が無い」状態）。
  */
-async function fetchAnyActive(subject: string, avoidId?: number): Promise<Question | null> {
-  let query = supabase().from("questions").select(QUESTION_COLS).eq("subject", subject).eq("status", "active").limit(1);
-  if (avoidId != null) query = query.neq("id", avoidId);
-  const { data } = await query;
-  const row = ((data ?? [])[0] as Question | undefined) ?? null;
-  if (row || avoidId == null) return row;
-  const { data: any } = await supabase()
+async function fetchLeastAttempted(subject: string): Promise<Question | null> {
+  const { data: active } = await supabase()
     .from("questions")
     .select(QUESTION_COLS)
     .eq("subject", subject)
-    .eq("status", "active")
-    .limit(1);
-  return ((any ?? [])[0] as Question | undefined) ?? null;
+    .eq("status", "active");
+  const rows = (active ?? []) as Question[];
+  if (rows.length === 0) return null;
+
+  const ids = rows.map((r) => r.id);
+  const { data: attempts } = await supabase().from("attempts").select("question_id").in("question_id", ids);
+  const countByQuestion = new Map<number, number>();
+  for (const a of attempts ?? []) {
+    countByQuestion.set(a.question_id, (countByQuestion.get(a.question_id) ?? 0) + 1);
+  }
+  const minCount = Math.min(...rows.map((r) => countByQuestion.get(r.id) ?? 0));
+  const leastAttempted = rows.filter((r) => (countByQuestion.get(r.id) ?? 0) === minCount);
+  return leastAttempted[Math.floor(Math.random() * leastAttempted.length)];
 }
 
 async function fetchQuestionById(id: number): Promise<Question | null> {
@@ -101,7 +107,7 @@ export async function getOrGenerateNext(subject: string, excludeIds: number[]): 
     // 今回のセッションで未出題の問題は無いが、新規も生成しない（上限 or 確率で見送り）場合。
     // 「上限に達したら新規が出ないだけで既出の問題が出る」という仕様を守るため、
     // セッション内の除外を無視してプールから再出題する。nullになるのはactiveが1問も無い時だけ。
-    const repeat = await fetchAnyActive(subject, excludeIds[excludeIds.length - 1]);
+    const repeat = await fetchLeastAttempted(subject);
     return { question: repeat, exhausted: !repeat };
   }
 
@@ -128,6 +134,6 @@ export async function getOrGenerateNext(subject: string, excludeIds: number[]): 
     return { question: unseenFallback, exhausted: false };
   }
   // これ以上生成もできず、未出題の問題も無い。それでも既出のactiveが1問でもあれば再出題する
-  const repeat = await fetchAnyActive(subject, excludeIds[excludeIds.length - 1]);
+  const repeat = await fetchLeastAttempted(subject);
   return { question: repeat, exhausted: !repeat };
 }
