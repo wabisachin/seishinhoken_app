@@ -36,6 +36,28 @@ async function fetchUnseenActive(subject: string, excludeIds: number[]): Promise
   return ((data ?? [])[0] as Question | undefined) ?? null;
 }
 
+/**
+ * 新規生成もせず、今回のセッションで未出題の問題も無くなった場合の再出題用。
+ * 「上限に達した＝新規が出ないだけで、既出の問題が出るだけ」という仕様を守るため、
+ * 除外リストは無視してプールから1問返す（可能ならavoidIdだけは避けて連続repeatを防ぐ）。
+ * これが null を返すのは、その科目にactiveな問題が1問も無い場合のみ
+ * （＝本当の意味での「出題できる問題が無い」状態）。
+ */
+async function fetchAnyActive(subject: string, avoidId?: number): Promise<Question | null> {
+  let query = supabase().from("questions").select(QUESTION_COLS).eq("subject", subject).eq("status", "active").limit(1);
+  if (avoidId != null) query = query.neq("id", avoidId);
+  const { data } = await query;
+  const row = ((data ?? [])[0] as Question | undefined) ?? null;
+  if (row || avoidId == null) return row;
+  const { data: any } = await supabase()
+    .from("questions")
+    .select(QUESTION_COLS)
+    .eq("subject", subject)
+    .eq("status", "active")
+    .limit(1);
+  return ((any ?? [])[0] as Question | undefined) ?? null;
+}
+
 async function fetchQuestionById(id: number): Promise<Question | null> {
   const { data } = await supabase().from("questions").select(QUESTION_COLS).eq("id", id).maybeSingle();
   return (data as Question | null) ?? null;
@@ -75,7 +97,12 @@ export async function getOrGenerateNext(subject: string, excludeIds: number[]): 
   const shouldGenerate = canGenerate && (!existing || Math.random() < newProbability);
 
   if (!shouldGenerate) {
-    return { question: existing, exhausted: !existing };
+    if (existing) return { question: existing, exhausted: false };
+    // 今回のセッションで未出題の問題は無いが、新規も生成しない（上限 or 確率で見送り）場合。
+    // 「上限に達したら新規が出ないだけで既出の問題が出る」という仕様を守るため、
+    // セッション内の除外を無視してプールから再出題する。nullになるのはactiveが1問も無い時だけ。
+    const repeat = await fetchAnyActive(subject, excludeIds[excludeIds.length - 1]);
+    return { question: repeat, exhausted: !repeat };
   }
 
   // generateOneQuestionは例外を投げることがある（キー不正・課金上限・レート制限等）。
@@ -94,7 +121,13 @@ export async function getOrGenerateNext(subject: string, excludeIds: number[]): 
     if (fresh) return { question: fresh, exhausted: false };
   }
   // 却下された場合は、代わりに出せる既存問題があればそれを返す
-  const fallback = existing ?? (await fetchUnseenActive(subject, excludeIds));
+  const unseenFallback = existing ?? (await fetchUnseenActive(subject, excludeIds));
   const stillCanGenerate = (await countBySubject(subject, ["active", "rejected"])) < HARD_CAP_TOTAL;
-  return { question: fallback, exhausted: !fallback && !stillCanGenerate };
+  if (unseenFallback || stillCanGenerate) {
+    // まだ試行の余地がある（クライアントがリトライすれば良い）ので、ここではexhausted扱いにしない
+    return { question: unseenFallback, exhausted: false };
+  }
+  // これ以上生成もできず、未出題の問題も無い。それでも既出のactiveが1問でもあれば再出題する
+  const repeat = await fetchAnyActive(subject, excludeIds[excludeIds.length - 1]);
+  return { question: repeat, exhausted: !repeat };
 }
