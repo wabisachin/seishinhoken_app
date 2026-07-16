@@ -27,6 +27,10 @@ type AnswerRecord = {
 // UXの保険として呼び出し回数の上限だけクライアント側にも置く（コストの上限はサーバー側の行数判定）。
 const MAX_NEXT_ATTEMPTS = 15;
 
+// 1セッションで一気に要求できる出題数の上限。ここが無いと「一度に100問」のような
+// リクエストで生成が延々と連発されてしまうため、UI側でも明示的に絞っておく。
+const MAX_SESSION_COUNT = 5;
+
 // 分野別演習の途中経過をlocalStorageに保存し、リロード/離脱後に再開できるようにする
 const SUBJECT_SESSION_KEY = "quiz_session_subject_v1";
 
@@ -77,7 +81,7 @@ function QuizInner({ mode }: { mode: Mode }) {
   const [phase, setPhase] = useState<Phase>(mode === "subject" ? "loading" : "setup");
   const [subjects, setSubjects] = useState<{ subject: string; taxonomy_items: number; kind: string | null }[]>([]);
   const [subject, setSubject] = useState("");
-  const [count, setCount] = useState(10);
+  const [count, setCount] = useState(MAX_SESSION_COUNT);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState<number[]>([]);
@@ -375,11 +379,17 @@ function QuizInner({ mode }: { mode: Mode }) {
             <input
               type="number"
               min={1}
-              max={50}
+              max={MAX_SESSION_COUNT}
               value={count}
-              onChange={(e) => setCount(parseInt(e.target.value || "10", 10))}
+              onChange={(e) => {
+                const n = parseInt(e.target.value || "1", 10);
+                setCount(Math.min(MAX_SESSION_COUNT, Math.max(1, Number.isNaN(n) ? 1 : n)));
+              }}
               className="mt-1 min-h-12 w-24 rounded-xl border border-stone-300 p-3"
             />
+            <p className="mt-1 text-xs text-stone-400">
+              一度に生成される問題数を抑えるため、1セッションあたり最大{MAX_SESSION_COUNT}問までです。
+            </p>
             <div className="mt-4">
               <button
                 onClick={start}
