@@ -42,18 +42,35 @@ export default function StatsPage() {
     <div className="space-y-6">
       <h1 className="text-xl font-bold">成績</h1>
 
-      <section className="rounded-xl bg-white p-5 shadow">
+      <section className="rounded-xl bg-white p-4 shadow sm:p-5">
         <h2 className="mb-3 font-bold text-indigo-700">科目別正答率（苦手順）</h2>
         <ResponsiveContainer width="100%" height={Math.max(300, bySubject.length * 32)}>
-          <BarChart data={bySubject} layout="vertical" margin={{ left: 40, right: 20 }}>
+          <BarChart data={bySubject} layout="vertical" margin={{ left: 0, right: 16 }}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis type="number" domain={[0, 100]} unit="%" />
-            <YAxis type="category" dataKey="subject" width={200} tick={{ fontSize: 11 }} />
+            <YAxis type="category" dataKey="subject" width={120} tick={{ fontSize: 10 }} />
             <Tooltip formatter={(v: number) => [`${v}%`, "正答率"]} />
             <Bar dataKey="accuracy" fill="#4f46e5" radius={[0, 4, 4, 0]} />
           </BarChart>
         </ResponsiveContainer>
-        <table className="mt-4 w-full text-sm">
+
+        {/* モバイル: カード表示 */}
+        <div className="mt-4 space-y-2 sm:hidden">
+          {bySubject.map((s) => (
+            <div key={s.subject} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
+              <span>{s.subject}</span>
+              <span className="flex items-center gap-3 text-slate-500">
+                <span>{s.correct}/{s.attempts}問</span>
+                <span className={`font-medium ${s.accuracy >= 60 ? "text-green-600" : "text-red-600"}`}>
+                  {s.accuracy}%
+                </span>
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {/* sm以上: テーブル表示 */}
+        <table className="mt-4 hidden w-full text-sm sm:table">
           <thead className="bg-slate-100 text-left">
             <tr>
               <th className="px-3 py-1.5">科目</th>

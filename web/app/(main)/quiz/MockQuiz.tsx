@@ -150,11 +150,17 @@ export default function MockQuiz() {
           <p className="text-sm text-amber-800">
             前回途中だった模試があります（{done} / {pendingResume.questions.length} 問まで解答済み）。続きから再開しますか？
           </p>
-          <div className="mt-3 flex gap-3">
-            <button onClick={resume} className="rounded bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-700">
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:gap-3">
+            <button
+              onClick={resume}
+              className="min-h-12 rounded-lg bg-indigo-600 px-4 py-3 text-sm font-medium text-white hover:bg-indigo-700"
+            >
               続きから再開する
             </button>
-            <button onClick={discardAndStart} className="rounded border border-slate-300 px-4 py-2 text-sm text-slate-600">
+            <button
+              onClick={discardAndStart}
+              className="min-h-12 rounded-lg border border-slate-300 px-4 py-3 text-sm text-slate-600"
+            >
               新しく始める
             </button>
           </div>
@@ -169,7 +175,7 @@ export default function MockQuiz() {
     return (
       <div className="space-y-4">
         <p className="rounded bg-amber-100 p-3 text-sm text-amber-800">{error}</p>
-        <Link href="/" className="inline-block rounded bg-indigo-600 px-5 py-2 text-white">
+        <Link href="/" className="inline-flex min-h-12 items-center rounded-lg bg-indigo-600 px-5 py-3 font-medium text-white">
           ダッシュボードへ
         </Link>
       </div>
@@ -245,11 +251,17 @@ export default function MockQuiz() {
           })}
         </div>
 
-        <div className="flex gap-3">
-          <button onClick={() => void startFresh()} className="rounded bg-indigo-600 px-5 py-2 text-white">
+        <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
+          <button
+            onClick={() => void startFresh()}
+            className="min-h-12 rounded-lg bg-indigo-600 px-5 py-3 font-medium text-white"
+          >
             もう一度
           </button>
-          <Link href="/stats" className="rounded border border-indigo-600 px-5 py-2 text-indigo-700">
+          <Link
+            href="/stats"
+            className="inline-flex min-h-12 items-center justify-center rounded-lg border border-indigo-600 px-5 py-3 font-medium text-indigo-700"
+          >
             成績を見る
           </Link>
         </div>
@@ -259,19 +271,19 @@ export default function MockQuiz() {
 
   // --- answering: 3問まとめて表示、即時フィードバック無し ---
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pb-24 sm:pb-0">
       <div className="flex items-center justify-between text-sm text-slate-500">
         <span>
           {Math.min(page * PAGE_SIZE + 1, questions.length)}〜{Math.min((page + 1) * PAGE_SIZE, questions.length)} /{" "}
           {questions.length} 問目
         </span>
-        <span>結果はまとめて最後に表示されます</span>
+        <span className="hidden sm:inline">結果はまとめて最後に表示されます</span>
       </div>
 
       {pageQuestions.map((q) => {
         const sel = draft[q.id] ?? [];
         return (
-          <div key={q.id} className="rounded-xl bg-white p-5 shadow">
+          <div key={q.id} className="rounded-xl bg-white p-4 shadow sm:p-5">
             <div className="mb-2 flex items-center gap-2 text-xs text-slate-400">
               <span className="rounded bg-slate-200 px-2 py-0.5">{q.subject}</span>
               <span>{q.question_type === "multi" ? "2つ選択" : "1つ選択"}</span>
@@ -282,7 +294,7 @@ export default function MockQuiz() {
                 {q.case_text}
               </div>
             )}
-            <p className="font-medium leading-relaxed">{q.stem}</p>
+            <p className="text-base font-medium leading-relaxed">{q.stem}</p>
             <div className="mt-3 space-y-2">
               {q.options.map((opt, i) => {
                 const n = i + 1;
@@ -291,7 +303,7 @@ export default function MockQuiz() {
                   <button
                     key={n}
                     onClick={() => toggle(q, n)}
-                    className={`block w-full rounded-lg border p-3 text-left text-sm ${
+                    className={`block min-h-12 w-full rounded-lg border p-3.5 text-left text-[15px] leading-snug sm:text-sm ${
                       chosen ? "border-indigo-500 bg-indigo-50" : "border-slate-200 bg-white hover:bg-slate-50"
                     }`}
                   >
@@ -305,13 +317,18 @@ export default function MockQuiz() {
         );
       })}
 
-      <button
-        onClick={submitPage}
-        disabled={!canProceed || submitting}
-        className="rounded bg-indigo-600 px-6 py-2 text-white hover:bg-indigo-700 disabled:opacity-40"
+      <div
+        className="fixed inset-x-0 bottom-0 z-10 border-t border-slate-200 bg-white/95 p-4 backdrop-blur sm:static sm:border-0 sm:bg-transparent sm:p-0"
+        style={{ paddingBottom: "max(env(safe-area-inset-bottom), 1rem)" }}
       >
-        {submitting ? "送信中..." : isLastPage ? "結果を見る" : "次の3問へ"}
-      </button>
+        <button
+          onClick={submitPage}
+          disabled={!canProceed || submitting}
+          className="min-h-12 w-full rounded-lg bg-indigo-600 px-6 py-3 font-medium text-white hover:bg-indigo-700 disabled:opacity-40 sm:w-auto"
+        >
+          {submitting ? "送信中..." : isLastPage ? "結果を見る" : "次の3問へ"}
+        </button>
+      </div>
       {error && <p className="rounded bg-red-100 p-3 text-sm text-red-700">{error}</p>}
     </div>
   );

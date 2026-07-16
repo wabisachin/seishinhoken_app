@@ -1,5 +1,6 @@
 import { supabase } from "./supabase";
 import { generateOneQuestion } from "./generation";
+import { logError } from "./errorLog";
 import type { Question } from "./types";
 
 // 累積アクティブ数がこれ未満の間は毎回新規生成する
@@ -77,10 +78,17 @@ export async function getOrGenerateNext(subject: string, excludeIds: number[]): 
     return { question: existing, exhausted: !existing };
   }
 
-  // generateOneQuestionは例外を投げることがある（キー不正・レート制限等）。
+  // generateOneQuestionは例外を投げることがある（キー不正・課金上限・レート制限等）。
   // ここでは握りつぶさず呼び出し元に伝播させ、フロント側で即座にエラー表示させる
-  // （「却下」と違い、無言でポーリングを続けさせるべきではないため）。
-  const result = await generateOneQuestion(subject);
+  // （「却下」と違い、無言でポーリングを続けさせるべきではないため）。ただし後から
+  // 管理画面や開発者が原因を追えるよう、伝播させる前にログとして残しておく。
+  let result;
+  try {
+    result = await generateOneQuestion(subject);
+  } catch (e) {
+    await logError("generation", e, { subject });
+    throw e;
+  }
   if (result.status === "active" && result.questionId) {
     const fresh = await fetchQuestionById(result.questionId);
     if (fresh) return { question: fresh, exhausted: false };

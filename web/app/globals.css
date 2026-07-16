@@ -1,5 +1,25 @@
 @import "tailwindcss";
 
+html {
+  /* iOSはinput/selectのfont-sizeが16px未満だとフォーカス時に自動ズームする。
+     基準を16pxに固定してそれを防ぐ（アクセント色1色+文字サイズ統一の一環）。 */
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
-  @apply bg-slate-50 text-slate-900;
+  @apply bg-slate-50 text-slate-900 antialiased;
+  overflow-x: hidden;
+}
+
+/* タップ時のグレーフラッシュ（モバイルブラウザ既定）を消し、代わりにTailwindのactive:で制御する */
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+input,
+select,
+textarea {
+  font-size: 16px;
 }

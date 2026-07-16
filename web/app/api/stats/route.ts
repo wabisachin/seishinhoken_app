@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { logError } from "@/lib/errorLog";
 
 /** 科目別の累計正答率と日次推移を返す */
 export async function GET() {
@@ -48,6 +49,7 @@ export async function GET() {
 
     return NextResponse.json({ bySubject, timeline });
   } catch (e) {
+    await logError("stats", e);
     const message = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ error: message }, { status: 500 });
   }

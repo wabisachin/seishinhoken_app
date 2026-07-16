@@ -53,7 +53,22 @@ export default function Dashboard() {
         (rows as SubjectRow[]).length === 0 ? null : (
           <section key={title as string}>
             <h2 className="mb-2 font-bold">{title as string}</h2>
-            <div className="overflow-hidden rounded-xl bg-white shadow">
+
+            {/* モバイル: カード表示 */}
+            <div className="space-y-2 sm:hidden">
+              {(rows as SubjectRow[]).map((s) => (
+                <div key={s.subject} className="rounded-xl bg-white p-4 shadow-sm">
+                  <p className="font-medium">{s.subject}</p>
+                  <div className="mt-2 flex gap-4 text-sm text-slate-500">
+                    <span>問題プール {s.pool}</span>
+                    <span>出題基準項目 {s.taxonomy_items}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* sm以上: テーブル表示 */}
+            <div className="hidden overflow-hidden rounded-xl bg-white shadow sm:block">
               <table className="w-full text-sm">
                 <thead className="bg-slate-100 text-left">
                   <tr>

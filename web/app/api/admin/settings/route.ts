@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAdminRequest } from "@/lib/adminAuth";
 import { getLlmSettings, setLlmSettings } from "@/lib/appSettings";
 import { MODEL_PRESETS } from "@/lib/types";
+import { logError } from "@/lib/errorLog";
 
 export async function GET(req: NextRequest) {
   if (!isAdminRequest(req)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -20,6 +21,7 @@ export async function POST(req: NextRequest) {
     await setLlmSettings({ provider, model });
     return NextResponse.json({ ok: true });
   } catch (e) {
+    await logError("admin-settings", e);
     const message = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ error: message }, { status: 500 });
   }

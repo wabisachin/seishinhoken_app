@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAdminRequest } from "@/lib/adminAuth";
 import { supabase } from "@/lib/supabase";
+import { logError } from "@/lib/errorLog";
 
 /**
  * 生成済み問題・解答履歴・進行中セッションを全削除する（検証データを消して本番運用を
@@ -17,6 +18,7 @@ export async function POST(req: NextRequest) {
     await sb.from("questions").delete().gte("id", 0);
     return NextResponse.json({ ok: true });
   } catch (e) {
+    await logError("admin-reset", e);
     const message = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ error: message }, { status: 500 });
   }

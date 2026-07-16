@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import type { Question } from "@/lib/types";
+import { logError } from "@/lib/errorLog";
 
 export const maxDuration = 60;
 
@@ -102,6 +103,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ error: `unknown mode: ${mode}` }, { status: 400 });
   } catch (e) {
+    await logError("quiz", e);
     const message = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ error: message }, { status: 500 });
   }

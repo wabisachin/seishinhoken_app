@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { logError } from "@/lib/errorLog";
 
 /** 解答を記録する。正誤判定はサーバー側でDBのcorrectと照合して行う */
 export async function POST(req: NextRequest) {
@@ -30,6 +31,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ is_correct: isCorrect, correct });
   } catch (e) {
+    await logError("attempts", e);
     const message = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ error: message }, { status: 500 });
   }

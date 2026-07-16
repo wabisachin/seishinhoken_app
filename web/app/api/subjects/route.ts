@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { logError } from "@/lib/errorLog";
 
 /** 科目一覧と、科目ごとの生成済み問題数・タクソノミー項目数を返す */
 export async function GET() {
@@ -33,6 +34,7 @@ export async function GET() {
     subjects.sort((a, b) => (a.kind ?? "").localeCompare(b.kind ?? "") || a.subject.localeCompare(b.subject, "ja"));
     return NextResponse.json({ subjects });
   } catch (e) {
+    await logError("subjects", e);
     const message = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ error: message }, { status: 500 });
   }

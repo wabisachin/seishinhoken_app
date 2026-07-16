@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { LlmSettings } from "@/lib/types";
 
 type Preset = { provider: LlmSettings["provider"]; model: string; label: string };
+type ErrorLog = { id: number; source: string; message: string; detail: string | null; created_at: string };
 
 export default function AdminPage() {
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -15,6 +16,8 @@ export default function AdminPage() {
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [resetConfirm, setResetConfirm] = useState(false);
   const [resetMsg, setResetMsg] = useState<string | null>(null);
+  const [errors, setErrors] = useState<ErrorLog[]>([]);
+  const [expandedError, setExpandedError] = useState<number | null>(null);
 
   useEffect(() => {
     fetch("/api/admin/status")
@@ -23,8 +26,22 @@ export default function AdminPage() {
   }, []);
 
   useEffect(() => {
-    if (authed) loadSettings();
+    if (authed) {
+      loadSettings();
+      loadErrors();
+    }
   }, [authed]);
+
+  function loadErrors() {
+    fetch("/api/admin/errors")
+      .then((r) => r.json())
+      .then((d) => setErrors(d.errors ?? []));
+  }
+
+  async function clearErrors() {
+    await fetch("/api/admin/errors", { method: "DELETE" });
+    setErrors([]);
+  }
 
   function loadSettings() {
     fetch("/api/admin/settings")
@@ -93,11 +110,11 @@ export default function AdminPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="パスワード"
-            className="w-full rounded border border-slate-300 p-2"
+            className="min-h-12 w-full rounded-lg border border-slate-300 p-3"
             autoFocus
           />
           {loginError && <p className="text-sm text-red-600">{loginError}</p>}
-          <button type="submit" className="w-full rounded bg-slate-800 px-4 py-2 text-white hover:bg-slate-900">
+          <button type="submit" className="min-h-12 w-full rounded-lg bg-slate-800 px-4 py-3 font-medium text-white hover:bg-slate-900">
             ログイン
           </button>
         </form>
@@ -125,13 +142,13 @@ export default function AdminPage() {
             return (
               <label
                 key={pkey}
-                className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 text-sm ${
+                className={`flex min-h-12 cursor-pointer items-center gap-3 rounded-lg border p-3 text-sm ${
                   key === pkey ? "border-slate-500 bg-slate-100" : "border-slate-200"
                 }`}
               >
-                <input type="radio" checked={key === pkey} onChange={() => saveModel(p)} />
+                <input type="radio" checked={key === pkey} onChange={() => saveModel(p)} className="h-4 w-4 shrink-0" />
                 <span>{p.label}</span>
-                <span className="ml-auto text-xs text-slate-400">{p.model}</span>
+                <span className="ml-auto shrink-0 text-xs text-slate-400">{p.model}</span>
               </label>
             );
           })}
@@ -147,20 +164,23 @@ export default function AdminPage() {
         {!resetConfirm ? (
           <button
             onClick={() => setResetConfirm(true)}
-            className="mt-3 rounded bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700"
+            className="mt-3 min-h-12 rounded-lg bg-red-600 px-4 py-3 text-sm font-medium text-white hover:bg-red-700"
           >
             リセットする
           </button>
         ) : (
           <div className="mt-3 space-y-2">
             <p className="text-sm font-medium text-red-700">本当に削除しますか？元に戻せません。</p>
-            <div className="flex gap-2">
-              <button onClick={runReset} className="rounded bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                onClick={runReset}
+                className="min-h-12 rounded-lg bg-red-600 px-4 py-3 text-sm font-medium text-white hover:bg-red-700"
+              >
                 削除を実行
               </button>
               <button
                 onClick={() => setResetConfirm(false)}
-                className="rounded border border-slate-300 px-4 py-2 text-sm text-slate-600"
+                className="min-h-12 rounded-lg border border-slate-300 px-4 py-3 text-sm text-slate-600"
               >
                 キャンセル
               </button>
@@ -168,6 +188,45 @@ export default function AdminPage() {
           </div>
         )}
         {resetMsg && <p className="mt-3 text-sm text-slate-700">{resetMsg}</p>}
+      </section>
+
+      <section className="rounded-xl bg-white p-5 shadow">
+        <div className="flex items-center justify-between">
+          <h2 className="font-bold text-slate-700">最近のエラー（直近50件）</h2>
+          {errors.length > 0 && (
+            <button onClick={clearErrors} className="text-xs text-slate-400 hover:underline">
+              クリア
+            </button>
+          )}
+        </div>
+        <p className="mt-1 text-sm text-slate-500">
+          LLMの課金上限・レート制限など、外部サービス連携で起きたエラーをここに記録しています。
+        </p>
+        {errors.length === 0 ? (
+          <p className="mt-3 text-sm text-slate-400">エラーはありません。</p>
+        ) : (
+          <ul className="mt-3 space-y-2">
+            {errors.map((e) => (
+              <li key={e.id} className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm">
+                <button
+                  onClick={() => setExpandedError(expandedError === e.id ? null : e.id)}
+                  className="flex w-full items-start justify-between gap-2 text-left"
+                >
+                  <span>
+                    <span className="mr-2 rounded bg-red-200 px-1.5 py-0.5 text-xs font-medium text-red-800">{e.source}</span>
+                    {e.message}
+                  </span>
+                  <span className="shrink-0 text-xs text-slate-400">{new Date(e.created_at).toLocaleString("ja-JP")}</span>
+                </button>
+                {expandedError === e.id && e.detail && (
+                  <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-white p-2 text-xs text-slate-600">
+                    {e.detail}
+                  </pre>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
     </div>
   );

@@ -320,11 +320,17 @@ function QuizInner({ mode }: { mode: Mode }) {
           <p className="text-sm text-amber-800">
             前回途中だった演習があります（{pendingResume.subject}: {pendingResume.records.length} / {pendingResume.count} 問まで解答済み）。続きから再開しますか？
           </p>
-          <div className="mt-3 flex gap-3">
-            <button onClick={resumeSession} className="rounded bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-700">
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:gap-3">
+            <button
+              onClick={resumeSession}
+              className="min-h-12 rounded-lg bg-indigo-600 px-4 py-3 text-sm font-medium text-white hover:bg-indigo-700"
+            >
               続きから再開する
             </button>
-            <button onClick={discardSession} className="rounded border border-slate-300 px-4 py-2 text-sm text-slate-600">
+            <button
+              onClick={discardSession}
+              className="min-h-12 rounded-lg border border-slate-300 px-4 py-3 text-sm text-slate-600"
+            >
               新しく始める
             </button>
           </div>
@@ -345,7 +351,7 @@ function QuizInner({ mode }: { mode: Mode }) {
             <select
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
-              className="mt-1 w-full rounded border border-slate-300 p-2"
+              className="mt-1 min-h-12 w-full rounded-lg border border-slate-300 p-3"
             >
               <option value="">選択してください</option>
               {subjects.map((s) => (
@@ -361,13 +367,13 @@ function QuizInner({ mode }: { mode: Mode }) {
               max={50}
               value={count}
               onChange={(e) => setCount(parseInt(e.target.value || "10", 10))}
-              className="mt-1 w-24 rounded border border-slate-300 p-2"
+              className="mt-1 min-h-12 w-24 rounded-lg border border-slate-300 p-3"
             />
             <div className="mt-4">
               <button
                 onClick={start}
                 disabled={!subject}
-                className="rounded bg-indigo-600 px-5 py-2 text-white hover:bg-indigo-700 disabled:opacity-40"
+                className="min-h-12 w-full rounded-lg bg-indigo-600 px-5 py-3 font-medium text-white hover:bg-indigo-700 disabled:opacity-40 sm:w-auto"
               >
                 開始
               </button>
@@ -376,7 +382,7 @@ function QuizInner({ mode }: { mode: Mode }) {
         )}
         {mode !== "subject" && !error && <p className="text-sm text-slate-600">読み込み中...</p>}
         {mode !== "subject" && error && (
-          <Link href="/" className="inline-block rounded bg-indigo-600 px-5 py-2 text-white">
+          <Link href="/" className="inline-flex min-h-12 items-center rounded-lg bg-indigo-600 px-5 py-3 font-medium text-white">
             ダッシュボードへ
           </Link>
         )}
@@ -400,7 +406,7 @@ function QuizInner({ mode }: { mode: Mode }) {
     return (
       <div className="space-y-3">
         <p className="rounded bg-red-100 p-3 text-sm text-red-700">{error ?? "問題を生成できませんでした。"}</p>
-        <button onClick={retryAfterStall} className="rounded bg-indigo-600 px-5 py-2 text-white hover:bg-indigo-700">
+        <button onClick={retryAfterStall} className="min-h-12 rounded-lg bg-indigo-600 px-5 py-3 font-medium text-white hover:bg-indigo-700">
           もう一度試す
         </button>
       </div>
@@ -435,11 +441,11 @@ function QuizInner({ mode }: { mode: Mode }) {
               setQuestions([]);
               setError(null);
             }}
-            className="rounded bg-indigo-600 px-5 py-2 text-white"
+            className="min-h-12 rounded-lg bg-indigo-600 px-5 py-3 font-medium text-white"
           >
             もう一度
           </button>
-          <Link href="/stats" className="rounded border border-indigo-600 px-5 py-2 text-indigo-700">
+          <Link href="/stats" className="inline-flex min-h-12 items-center rounded-lg border border-indigo-600 px-5 py-3 font-medium text-indigo-700">
             成績を見る
           </Link>
         </div>
@@ -452,7 +458,7 @@ function QuizInner({ mode }: { mode: Mode }) {
 
   // --- 出題 / 解説 ---
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pb-24 sm:pb-0">
       <div className="flex items-center justify-between text-sm text-slate-500">
         <span>
           {index + 1} / {mode === "subject" ? count : questions.length} 問目
@@ -461,14 +467,14 @@ function QuizInner({ mode }: { mode: Mode }) {
         <span>{q.question_type === "multi" ? "2つ選択" : "1つ選択"}</span>
       </div>
 
-      <div className="rounded-xl bg-white p-5 shadow">
+      <div className="rounded-xl bg-white p-4 shadow sm:p-5">
         {q.case_text && (
           <div className="mb-4 rounded bg-slate-50 p-3 text-sm leading-relaxed">
             <span className="mr-1 font-bold">〔事例〕</span>
             {q.case_text}
           </div>
         )}
-        <p className="font-medium leading-relaxed">{q.stem}</p>
+        <p className="text-base font-medium leading-relaxed">{q.stem}</p>
         <div className="mt-4 space-y-2">
           {q.options.map((opt, i) => {
             const n = i + 1;
@@ -487,7 +493,7 @@ function QuizInner({ mode }: { mode: Mode }) {
                 key={n}
                 disabled={phase === "explaining"}
                 onClick={() => toggle(n)}
-                className={`block w-full rounded-lg border p-3 text-left text-sm ${style}`}
+                className={`block min-h-12 w-full rounded-lg border p-3.5 text-left text-[15px] leading-snug sm:text-sm ${style}`}
               >
                 <span className="mr-2 font-bold">{n}</span>
                 {opt}
@@ -497,13 +503,18 @@ function QuizInner({ mode }: { mode: Mode }) {
           })}
         </div>
         {phase === "answering" && (
-          <button
-            onClick={submit}
-            disabled={selected.length === 0}
-            className="mt-4 rounded bg-indigo-600 px-6 py-2 text-white hover:bg-indigo-700 disabled:opacity-40"
+          <div
+            className="fixed inset-x-0 bottom-0 z-10 border-t border-slate-200 bg-white/95 p-4 backdrop-blur sm:static sm:mt-4 sm:border-0 sm:bg-transparent sm:p-0"
+            style={{ paddingBottom: "max(env(safe-area-inset-bottom), 1rem)" }}
           >
-            解答する
-          </button>
+            <button
+              onClick={submit}
+              disabled={selected.length === 0}
+              className="min-h-12 w-full rounded-lg bg-indigo-600 px-6 py-3 font-medium text-white hover:bg-indigo-700 disabled:opacity-40 sm:w-auto"
+            >
+              解答する
+            </button>
+          </div>
         )}
       </div>
 
@@ -557,9 +568,17 @@ function QuizInner({ mode }: { mode: Mode }) {
             </div>
           )}
 
-          <button onClick={next} className="rounded bg-indigo-600 px-6 py-2 text-white hover:bg-indigo-700">
-            {(mode === "subject" ? records.length >= count : index + 1 >= questions.length) ? "結果を見る" : "次の問題へ"}
-          </button>
+          <div
+            className="fixed inset-x-0 bottom-0 z-10 border-t border-slate-200 bg-white/95 p-4 backdrop-blur sm:static sm:border-0 sm:bg-transparent sm:p-0"
+            style={{ paddingBottom: "max(env(safe-area-inset-bottom), 1rem)" }}
+          >
+            <button
+              onClick={next}
+              className="min-h-12 w-full rounded-lg bg-indigo-600 px-6 py-3 font-medium text-white hover:bg-indigo-700 sm:w-auto"
+            >
+              {(mode === "subject" ? records.length >= count : index + 1 >= questions.length) ? "結果を見る" : "次の問題へ"}
+            </button>
+          </div>
         </div>
       )}
       {error && <p className="rounded bg-red-100 p-3 text-sm text-red-700">{error}</p>}
