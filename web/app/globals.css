@@ -8,8 +8,25 @@ html {
 }
 
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  @apply text-stone-900 antialiased;
+  background-color: #faf6f0; /* 冷たいグレーではなく、温かみのあるクリーム地 */
   overflow-x: hidden;
+  font-family: var(--font-zen-maru), "Hiragino Maru Gothic ProN", "Hiragino Sans", sans-serif;
+}
+
+/* カード等の柔らかい影。既定のshadowユーティリティより広く淡く、温かい色みに寄せている */
+.shadow-warm-sm {
+  box-shadow: 0 1px 3px rgba(120, 95, 65, 0.08);
+}
+.shadow-warm {
+  box-shadow:
+    0 1px 2px rgba(120, 95, 65, 0.06),
+    0 8px 20px -6px rgba(120, 95, 65, 0.12);
+}
+.shadow-warm-lg {
+  box-shadow:
+    0 2px 4px rgba(120, 95, 65, 0.08),
+    0 16px 32px -10px rgba(120, 95, 65, 0.18);
 }
 
 /* タップ時のグレーフラッシュ（モバイルブラウザ既定）を消し、代わりにTailwindのactive:で制御する */

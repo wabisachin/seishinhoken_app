@@ -316,20 +316,20 @@ function QuizInner({ mode }: { mode: Mode }) {
     return (
       <div className="space-y-4">
         <h1 className="text-xl font-bold">分野別演習</h1>
-        <div className="rounded-xl bg-amber-50 p-5 shadow">
+        <div className="rounded-2xl bg-amber-50 p-5 shadow-warm">
           <p className="text-sm text-amber-800">
             前回途中だった演習があります（{pendingResume.subject}: {pendingResume.records.length} / {pendingResume.count} 問まで解答済み）。続きから再開しますか？
           </p>
           <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:gap-3">
             <button
               onClick={resumeSession}
-              className="min-h-12 rounded-lg bg-indigo-600 px-4 py-3 text-sm font-medium text-white hover:bg-indigo-700"
+              className="min-h-12 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
             >
               続きから再開する
             </button>
             <button
               onClick={discardSession}
-              className="min-h-12 rounded-lg border border-slate-300 px-4 py-3 text-sm text-slate-600"
+              className="min-h-12 rounded-xl border border-stone-300 px-4 py-3 text-sm text-stone-600 transition-colors hover:bg-stone-100"
             >
               新しく始める
             </button>
@@ -346,12 +346,12 @@ function QuizInner({ mode }: { mode: Mode }) {
         <h1 className="text-xl font-bold">{mode === "subject" ? "分野別演習" : "復習モード"}</h1>
         {error && <p className="rounded bg-amber-100 p-3 text-sm text-amber-800">{error}</p>}
         {mode === "subject" && (
-          <div className="rounded-xl bg-white p-5 shadow">
+          <div className="rounded-2xl bg-white p-5 shadow-warm">
             <label className="block text-sm font-medium">科目</label>
             <select
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
-              className="mt-1 min-h-12 w-full rounded-lg border border-slate-300 p-3"
+              className="mt-1 min-h-12 w-full rounded-xl border border-stone-300 p-3"
             >
               <option value="">選択してください</option>
               {subjects.map((s) => (
@@ -367,22 +367,22 @@ function QuizInner({ mode }: { mode: Mode }) {
               max={50}
               value={count}
               onChange={(e) => setCount(parseInt(e.target.value || "10", 10))}
-              className="mt-1 min-h-12 w-24 rounded-lg border border-slate-300 p-3"
+              className="mt-1 min-h-12 w-24 rounded-xl border border-stone-300 p-3"
             />
             <div className="mt-4">
               <button
                 onClick={start}
                 disabled={!subject}
-                className="min-h-12 w-full rounded-lg bg-indigo-600 px-5 py-3 font-medium text-white hover:bg-indigo-700 disabled:opacity-40 sm:w-auto"
+                className="min-h-12 w-full rounded-xl bg-indigo-600 px-5 py-3 font-medium text-white hover:bg-indigo-700 transition-colors disabled:opacity-40 sm:w-auto"
               >
                 開始
               </button>
             </div>
           </div>
         )}
-        {mode !== "subject" && !error && <p className="text-sm text-slate-600">読み込み中...</p>}
+        {mode !== "subject" && !error && <p className="text-sm text-stone-600">読み込み中...</p>}
         {mode !== "subject" && error && (
-          <Link href="/" className="inline-flex min-h-12 items-center rounded-lg bg-indigo-600 px-5 py-3 font-medium text-white">
+          <Link href="/" className="inline-flex min-h-12 items-center rounded-xl bg-indigo-600 px-5 py-3 font-medium text-white transition-colors hover:bg-indigo-700">
             ダッシュボードへ
           </Link>
         )}
@@ -406,7 +406,7 @@ function QuizInner({ mode }: { mode: Mode }) {
     return (
       <div className="space-y-3">
         <p className="rounded bg-red-100 p-3 text-sm text-red-700">{error ?? "問題を生成できませんでした。"}</p>
-        <button onClick={retryAfterStall} className="min-h-12 rounded-lg bg-indigo-600 px-5 py-3 font-medium text-white hover:bg-indigo-700">
+        <button onClick={retryAfterStall} className="min-h-12 rounded-xl bg-indigo-600 px-5 py-3 font-medium text-white hover:bg-indigo-700 transition-colors">
           もう一度試す
         </button>
       </div>
@@ -419,17 +419,17 @@ function QuizInner({ mode }: { mode: Mode }) {
     return (
       <div className="space-y-4">
         <h1 className="text-xl font-bold">結果</h1>
-        <div className="rounded-xl bg-white p-6 text-center shadow">
+        <div className="rounded-2xl bg-white p-6 text-center shadow-warm">
           <p className="text-4xl font-bold text-indigo-700">
             {correct} / {records.length}
           </p>
-          <p className="mt-1 text-slate-600">正答率 {Math.round((100 * correct) / Math.max(records.length, 1))}%</p>
+          <p className="mt-1 text-stone-600">正答率 {Math.round((100 * correct) / Math.max(records.length, 1))}%</p>
         </div>
         <div className="space-y-2">
           {records.map((r, i) => (
-            <div key={i} className="flex items-center gap-3 rounded-lg bg-white p-3 text-sm shadow-sm">
+            <div key={i} className="flex items-center gap-3 rounded-xl bg-white p-3 text-sm shadow-warm-sm">
               <span className={r.isCorrect ? "text-green-600" : "text-red-600"}>{r.isCorrect ? "○" : "×"}</span>
-              <span className="text-xs text-slate-400">{r.question.subject}</span>
+              <span className="text-xs text-stone-400">{r.question.subject}</span>
               <span className="line-clamp-1">{r.question.stem}</span>
             </div>
           ))}
@@ -441,11 +441,11 @@ function QuizInner({ mode }: { mode: Mode }) {
               setQuestions([]);
               setError(null);
             }}
-            className="min-h-12 rounded-lg bg-indigo-600 px-5 py-3 font-medium text-white"
+            className="min-h-12 rounded-xl bg-indigo-600 px-5 py-3 font-medium text-white transition-colors hover:bg-indigo-700"
           >
             もう一度
           </button>
-          <Link href="/stats" className="inline-flex min-h-12 items-center rounded-lg border border-indigo-600 px-5 py-3 font-medium text-indigo-700">
+          <Link href="/stats" className="inline-flex min-h-12 items-center rounded-xl border border-indigo-600 px-5 py-3 font-medium text-indigo-700 transition-colors hover:bg-indigo-50">
             成績を見る
           </Link>
         </div>
@@ -459,17 +459,17 @@ function QuizInner({ mode }: { mode: Mode }) {
   // --- 出題 / 解説 ---
   return (
     <div className="space-y-4 pb-24 sm:pb-0">
-      <div className="flex items-center justify-between text-sm text-slate-500">
+      <div className="flex items-center justify-between text-sm text-stone-500">
         <span>
           {index + 1} / {mode === "subject" ? count : questions.length} 問目
-          <span className="ml-3 rounded bg-slate-200 px-2 py-0.5 text-xs">{q.subject}</span>
+          <span className="ml-3 rounded bg-stone-200 px-2 py-0.5 text-xs">{q.subject}</span>
         </span>
         <span>{q.question_type === "multi" ? "2つ選択" : "1つ選択"}</span>
       </div>
 
-      <div className="rounded-xl bg-white p-4 shadow sm:p-5">
+      <div className="rounded-2xl bg-white p-4 shadow-warm sm:p-5">
         {q.case_text && (
-          <div className="mb-4 rounded bg-slate-50 p-3 text-sm leading-relaxed">
+          <div className="mb-4 rounded bg-stone-50 p-3 text-sm leading-relaxed">
             <span className="mr-1 font-bold">〔事例〕</span>
             {q.case_text}
           </div>
@@ -480,11 +480,11 @@ function QuizInner({ mode }: { mode: Mode }) {
             const n = i + 1;
             const chosen = phase === "explaining" ? record.selected.includes(n) : selected.includes(n);
             const isAnswer = q.correct.includes(n);
-            let style = "border-slate-200 bg-white hover:bg-slate-50";
+            let style = "border-stone-200 bg-white hover:bg-stone-50";
             if (phase === "explaining") {
               if (isAnswer) style = "border-green-500 bg-green-50";
               else if (chosen) style = "border-red-400 bg-red-50";
-              else style = "border-slate-200 bg-white opacity-70";
+              else style = "border-stone-200 bg-white opacity-70";
             } else if (chosen) {
               style = "border-indigo-500 bg-indigo-50";
             }
@@ -493,7 +493,7 @@ function QuizInner({ mode }: { mode: Mode }) {
                 key={n}
                 disabled={phase === "explaining"}
                 onClick={() => toggle(n)}
-                className={`block min-h-12 w-full rounded-lg border p-3.5 text-left text-[15px] leading-snug sm:text-sm ${style}`}
+                className={`block min-h-12 w-full rounded-xl border p-3.5 text-left text-[15px] leading-snug transition-colors sm:text-sm ${style}`}
               >
                 <span className="mr-2 font-bold">{n}</span>
                 {opt}
@@ -504,13 +504,13 @@ function QuizInner({ mode }: { mode: Mode }) {
         </div>
         {phase === "answering" && (
           <div
-            className="fixed inset-x-0 bottom-0 z-10 border-t border-slate-200 bg-white/95 p-4 backdrop-blur sm:static sm:mt-4 sm:border-0 sm:bg-transparent sm:p-0"
+            className="fixed inset-x-0 bottom-0 z-10 border-t border-stone-200 bg-white/95 p-4 backdrop-blur sm:static sm:mt-4 sm:border-0 sm:bg-transparent sm:p-0"
             style={{ paddingBottom: "max(env(safe-area-inset-bottom), 1rem)" }}
           >
             <button
               onClick={submit}
               disabled={selected.length === 0}
-              className="min-h-12 w-full rounded-lg bg-indigo-600 px-6 py-3 font-medium text-white hover:bg-indigo-700 disabled:opacity-40 sm:w-auto"
+              className="min-h-12 w-full rounded-xl bg-indigo-600 px-6 py-3 font-medium text-white hover:bg-indigo-700 transition-colors disabled:opacity-40 sm:w-auto"
             >
               解答する
             </button>
@@ -521,21 +521,21 @@ function QuizInner({ mode }: { mode: Mode }) {
       {phase === "explaining" && (
         <div className="space-y-4">
           <div
-            className={`rounded-xl p-4 text-center text-lg font-bold ${
+            className={`rounded-2xl p-4 text-center text-lg font-bold ${
               record.isCorrect ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
             }`}
           >
             {record.isCorrect ? "正解！" : `不正解（正答: ${q.correct.join("、")}）`}
           </div>
 
-          <div className="rounded-xl bg-white p-5 shadow">
+          <div className="rounded-2xl bg-white p-5 shadow-warm">
             <h3 className="mb-3 font-bold text-indigo-700">選択肢ごとの解説</h3>
             <ol className="space-y-3">
               {q.explanations.map((ex, i) => (
                 <li key={i} className="flex gap-2 text-sm leading-relaxed">
                   <span
                     className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
-                      q.correct.includes(i + 1) ? "bg-green-600 text-white" : "bg-slate-300 text-slate-700"
+                      q.correct.includes(i + 1) ? "bg-green-600 text-white" : "bg-stone-300 text-stone-700"
                     }`}
                   >
                     {i + 1}
@@ -547,19 +547,19 @@ function QuizInner({ mode }: { mode: Mode }) {
           </div>
 
           {q.key_points && (
-            <div className="rounded-xl bg-amber-50 p-5 shadow">
+            <div className="rounded-2xl bg-amber-50 p-5 shadow-warm">
               <h3 className="mb-2 font-bold text-amber-800">押さえておくべきポイント</h3>
               <p className="whitespace-pre-wrap text-sm leading-relaxed">{q.key_points}</p>
             </div>
           )}
 
           {q.citations && q.citations.length > 0 && (
-            <div className="rounded-xl bg-white p-5 shadow">
-              <h3 className="mb-2 font-bold text-slate-700">教科書の根拠</h3>
+            <div className="rounded-2xl bg-white p-5 shadow-warm">
+              <h3 className="mb-2 font-bold text-stone-700">教科書の根拠</h3>
               {q.citations.map((c, i) => (
-                <blockquote key={i} className="mb-3 border-l-4 border-indigo-200 pl-3 text-sm text-slate-600">
+                <blockquote key={i} className="mb-3 border-l-4 border-indigo-200 pl-3 text-sm text-stone-600">
                   <p className="whitespace-pre-wrap leading-relaxed">{c.excerpt}</p>
-                  <footer className="mt-1 text-xs text-slate-400">
+                  <footer className="mt-1 text-xs text-stone-400">
                     {c.book} p.{c.page_start}
                     {c.page_end !== c.page_start ? `–${c.page_end}` : ""}
                   </footer>
@@ -569,12 +569,12 @@ function QuizInner({ mode }: { mode: Mode }) {
           )}
 
           <div
-            className="fixed inset-x-0 bottom-0 z-10 border-t border-slate-200 bg-white/95 p-4 backdrop-blur sm:static sm:border-0 sm:bg-transparent sm:p-0"
+            className="fixed inset-x-0 bottom-0 z-10 border-t border-stone-200 bg-white/95 p-4 backdrop-blur sm:static sm:border-0 sm:bg-transparent sm:p-0"
             style={{ paddingBottom: "max(env(safe-area-inset-bottom), 1rem)" }}
           >
             <button
               onClick={next}
-              className="min-h-12 w-full rounded-lg bg-indigo-600 px-6 py-3 font-medium text-white hover:bg-indigo-700 sm:w-auto"
+              className="min-h-12 w-full rounded-xl bg-indigo-600 px-6 py-3 font-medium text-white transition-colors hover:bg-indigo-700 sm:w-auto"
             >
               {(mode === "subject" ? records.length >= count : index + 1 >= questions.length) ? "結果を見る" : "次の問題へ"}
             </button>

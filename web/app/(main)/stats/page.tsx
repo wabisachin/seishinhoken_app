@@ -36,13 +36,13 @@ export default function StatsPage() {
 
   if (error) return <p className="rounded bg-red-100 p-3 text-sm text-red-700">{error}</p>;
   if (bySubject.length === 0)
-    return <p className="text-slate-600">まだ解答記録がありません。演習すると科目別の成績が表示されます。</p>;
+    return <p className="text-stone-600">まだ解答記録がありません。演習すると科目別の成績が表示されます。</p>;
 
   return (
     <div className="space-y-6">
       <h1 className="text-xl font-bold">成績</h1>
 
-      <section className="rounded-xl bg-white p-4 shadow sm:p-5">
+      <section className="rounded-2xl bg-white p-4 shadow-warm sm:p-5">
         <h2 className="mb-3 font-bold text-indigo-700">科目別正答率（苦手順）</h2>
         <ResponsiveContainer width="100%" height={Math.max(300, bySubject.length * 32)}>
           <BarChart data={bySubject} layout="vertical" margin={{ left: 0, right: 16 }}>
@@ -57,9 +57,9 @@ export default function StatsPage() {
         {/* モバイル: カード表示 */}
         <div className="mt-4 space-y-2 sm:hidden">
           {bySubject.map((s) => (
-            <div key={s.subject} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
+            <div key={s.subject} className="flex items-center justify-between rounded-xl bg-stone-50 px-3 py-2 text-sm">
               <span>{s.subject}</span>
-              <span className="flex items-center gap-3 text-slate-500">
+              <span className="flex items-center gap-3 text-stone-500">
                 <span>{s.correct}/{s.attempts}問</span>
                 <span className={`font-medium ${s.accuracy >= 60 ? "text-green-600" : "text-red-600"}`}>
                   {s.accuracy}%
@@ -71,7 +71,7 @@ export default function StatsPage() {
 
         {/* sm以上: テーブル表示 */}
         <table className="mt-4 hidden w-full text-sm sm:table">
-          <thead className="bg-slate-100 text-left">
+          <thead className="bg-stone-100 text-left">
             <tr>
               <th className="px-3 py-1.5">科目</th>
               <th className="px-3 py-1.5 text-right">解答数</th>
@@ -81,7 +81,7 @@ export default function StatsPage() {
           </thead>
           <tbody>
             {bySubject.map((s) => (
-              <tr key={s.subject} className="border-t border-slate-100">
+              <tr key={s.subject} className="border-t border-stone-100">
                 <td className="px-3 py-1.5">{s.subject}</td>
                 <td className="px-3 py-1.5 text-right">{s.attempts}</td>
                 <td className="px-3 py-1.5 text-right">{s.correct}</td>
@@ -96,11 +96,11 @@ export default function StatsPage() {
             ))}
           </tbody>
         </table>
-        <p className="mt-2 text-xs text-slate-400">※ 本番の合格基準は総得点の約60%（+全科目群で得点）</p>
+        <p className="mt-2 text-xs text-stone-400">※ 本番の合格基準は総得点の約60%（+全科目群で得点）</p>
       </section>
 
       {timeline.length > 1 && (
-        <section className="rounded-xl bg-white p-5 shadow">
+        <section className="rounded-2xl bg-white p-5 shadow-warm">
           <h2 className="mb-3 font-bold text-indigo-700">正答率の推移</h2>
           <ResponsiveContainer width="100%" height={260}>
             <LineChart data={timeline}>
