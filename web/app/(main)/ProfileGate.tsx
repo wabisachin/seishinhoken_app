@@ -22,7 +22,7 @@ export default function ProfileGate({ children }: { children: React.ReactNode })
       <div className="mx-auto max-w-md space-y-4 px-4 py-12">
         <h1 className="text-lg font-bold">はじめに、あなたについて教えてください</h1>
         <p className="text-sm leading-relaxed text-stone-600">
-          ログインやパスワードは不要です。本人と保護者・見学者が同時にこのアプリを使っても、
+          ログインやパスワードは不要です。ご本人と応援する人が同時にこのアプリを使っても、
           成績や復習の記録が混ざらないようにするための設定です。
         </p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -37,7 +37,7 @@ export default function ProfileGate({ children }: { children: React.ReactNode })
             onClick={() => choose("guardian")}
             className="rounded-2xl border-l-4 border-violet-400 bg-white p-5 text-left shadow-warm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-warm-lg"
           >
-            <h2 className="font-bold text-violet-700">保護者・見学者</h2>
+            <h2 className="font-bold text-violet-700">応援する人</h2>
             <p className="mt-1 text-sm text-stone-600">成績を見るだけで、問題は解きません</p>
           </button>
         </div>

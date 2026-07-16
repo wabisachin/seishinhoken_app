@@ -68,7 +68,7 @@ export async function GET() {
       }))
       .sort((a, b) => a.day.localeCompare(b.day));
 
-    // 月次推移（保護者が全体の伸びを見やすいように）
+    // 月次推移（応援する人が全体の伸びを見やすいように）
     const byMonth = new Map<string, { attempts: number; correct: number }>();
     for (const r of rows) {
       const month = String(r.day).slice(0, 7); // YYYY-MM

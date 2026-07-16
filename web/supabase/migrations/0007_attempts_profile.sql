@@ -1,4 +1,4 @@
--- リリース初期は本人・保護者・テスターが同じアプリを同時に触る可能性があるため、
+-- リリース初期は本人・応援する人（家族やテスター）が同じアプリを同時に触る可能性があるため、
 -- 誰の解答かをprofileで区別できるようにする（ログイン機能ではなく、ブラウザの
 -- localStorageに保存された自己申告の区分。'self'=本人のみ成績・復習対象に含める）。
 alter table attempts add column profile text not null default 'self';
