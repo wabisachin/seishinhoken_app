@@ -5,6 +5,23 @@ import { supabase } from "./supabase";
 import { retrieveForItem, RetrievedChunk, TaxonomyItem } from "./retrieval";
 import { getLlmSettings } from "./appSettings";
 
+/**
+ * プロンプトキャッシング対策: 同じ項目に対する生成1〜2回目・検証呼び出しは
+ * 「指示文＋根拠チャンク」の部分が完全に同一バイト列になるようにし、これを
+ * 常に固定のtext partとして先頭に置く（可変部分は必ず後ろに続ける）。
+ * OpenAI/Geminiは同一の先頭バイト列を自動でキャッシュするためこれだけで効く。
+ * Anthropicは明示的なcache_controlが無いとキャッシュされないため、
+ * 対応プロバイダでのみ有効なproviderOptionsとして付与しておく
+ * （他プロバイダは未知のproviderOptionsを無視するだけなので安全）。
+ */
+function cachedPrefix(text: string) {
+  return {
+    type: "text" as const,
+    text,
+    providerOptions: { anthropic: { cacheControl: { type: "ephemeral" as const } } },
+  };
+}
+
 // 構造化出力スキーマ（プロバイダ非対応の制約は避け、後段で手動検証する）
 // フィールド順序が生成順序に対応するため、必ず「各選択肢の正誤を吟味(explanations)」→
 // 「その結論から正答を確定(correct)」の順にする。逆順だと正答を先に決め打ちしてから
@@ -131,26 +148,10 @@ export async function generateOneQuestion(subject: string): Promise<GenerateResu
   const fewShot = await fewShotExamples(subject);
   const { stems: pastStems, excerpts: pastExcerpts } = await existingCoverage(item.id);
 
-  const basePrompt = `あなたは精神保健福祉士国家試験の作問委員です。教科書の記述のみを根拠に、本番と同水準の問題を1問作成してください。
-
-# 出題対象
-科目: ${subject}
-出題基準の項目: ${topic}
-
-# 根拠テキスト（教科書からの抜粋。この内容のみを事実の根拠とすること）
-${chunkBlock(main)}
-
-# 周辺トピックのテキスト（誤答選択肢の材料に使ってよい）
-${chunkBlock(neighbor)}
-
-# 実際の過去問の文体・形式（これに厳密に合わせる）
-${fewShot}
-
-# この項目で既に出題済みの問題文（重複厳禁。同じ論点の焼き直しをせず、根拠テキストの別の側面・別の記述を使うこと）
-${pastStems.length ? pastStems.map((s, i) => `${i + 1}. ${s}`).join("\n") : "（まだ無し）"}
-
-# 既に根拠として使用済みの抜粋（できるだけ避け、根拠テキストの別の部分を使うこと）
-${pastExcerpts.length ? pastExcerpts.map((e, i) => `${i + 1}. ${e}...`).join("\n") : "（まだ無し）"}
+  // 固定部分（指示＋作問ルール＋根拠チャンク）: 同一項目に対する生成1〜2回目の
+  // 呼び出し間で完全に同一バイト列になる。可変部分（few-shot・既出問題・retryNote）は
+  // 必ずこの後ろに続け、先頭の固定部分がプロンプトキャッシュに乗るようにする。
+  const staticPrefix = `あなたは精神保健福祉士国家試験の作問委員です。教科書の記述のみを根拠に、本番と同水準の問題を1問作成してください。
 
 # 作問ルール
 - 問題形式: 五肢択一（correct 1つ）または五肢択二（correct 2つ、問題文に「2つ選びなさい」と明記）。事例問題にしてもよい
@@ -164,7 +165,26 @@ ${pastExcerpts.length ? pastExcerpts.map((e, i) => `${i + 1}. ${e}...`).join("\n
   2. その吟味結果だけを根拠にcorrectを決める（explanationsの結論とcorrectが食い違うことは絶対に許されない）
 - explanations は選択肢1〜5の順に5つ。学習に役立つよう具体的に書く
 - key_points はこの問題の周辺で覚えるべきことの整理（混同しやすい概念の対比など）
-- citation_chunk_ids には実際に根拠として使ったチャンクのid（整数）を入れる`;
+- citation_chunk_ids には実際に根拠として使ったチャンクのid（整数）を入れる
+
+# 出題対象
+科目: ${subject}
+出題基準の項目: ${topic}
+
+# 根拠テキスト（教科書からの抜粋。この内容のみを事実の根拠とすること）
+${chunkBlock(main)}
+
+# 周辺トピックのテキスト（誤答選択肢の材料に使ってよい）
+${chunkBlock(neighbor)}`;
+
+  const variableSuffix = `# 実際の過去問の文体・形式（これに厳密に合わせる）
+${fewShot}
+
+# この項目で既に出題済みの問題文（重複厳禁。同じ論点の焼き直しをせず、根拠テキストの別の側面・別の記述を使うこと）
+${pastStems.length ? pastStems.map((s, i) => `${i + 1}. ${s}`).join("\n") : "（まだ無し）"}
+
+# 既に根拠として使用済みの抜粋（できるだけ避け、根拠テキストの別の部分を使うこと）
+${pastExcerpts.length ? pastExcerpts.map((e, i) => `${i + 1}. ${e}...`).join("\n") : "（まだ無し）"}`;
 
   const model = getModel(llm);
   const modelName = llm.model;
@@ -177,7 +197,12 @@ ${pastExcerpts.length ? pastExcerpts.map((e, i) => `${i + 1}. ${e}...`).join("\n
     const { object: q } = await generateObject({
       model,
       schema: questionSchema,
-      prompt: basePrompt + retryNote,
+      prompt: [
+        {
+          role: "user",
+          content: [cachedPrefix(staticPrefix), { type: "text", text: variableSuffix + retryNote }],
+        },
+      ],
     });
 
     // 形式チェック
@@ -193,24 +218,30 @@ ${pastExcerpts.length ? pastExcerpts.map((e, i) => `${i + 1}. ${e}...`).join("\n
     }
 
     // 4. 検証パス: 根拠テキストと照合
+    // ここも根拠チャンク部分は同一項目の検証呼び出し間で不変なので固定prefixとして分離する
     const optionsList = q.options.map((o, i) => `${i + 1} ${o}`).join("\n");
-    const { object: verdict } = await generateObject({
-      model,
-      schema: verifySchema,
-      prompt: `あなたは試験問題の校閲者です。次の問題を根拠テキストと照合し、以下をすべて検証してください:
-1. 正答（${q.correct.join(", ")}）が根拠テキストの記述で支持されること
+    const verifyStaticPrefix = `あなたは試験問題の校閲者です。次の問題を根拠テキストと照合し、以下をすべて検証してください:
+1. 正答が根拠テキストの記述で支持されること
 2. 各誤答選択肢が根拠テキストと矛盾する、または明確に誤りであること（正答になり得る誤答が無いこと）
 3. 問題文・選択肢に根拠テキストに無い事実の捏造が無いこと
 4. 五肢択一/択二として成立していること（正答が一意に定まる）
 
 # 根拠テキスト
 ${chunkBlock(main)}
-${chunkBlock(neighbor)}
-
-# 問題
+${chunkBlock(neighbor)}`;
+    const verifyTarget = `# 問題
 ${q.case_text ? `〔事例〕${q.case_text}\n` : ""}${q.stem}
 ${optionsList}
-正答: ${q.correct.join(", ")}`,
+正答: ${q.correct.join(", ")}`;
+    const { object: verdict } = await generateObject({
+      model,
+      schema: verifySchema,
+      prompt: [
+        {
+          role: "user",
+          content: [cachedPrefix(verifyStaticPrefix), { type: "text", text: verifyTarget }],
+        },
+      ],
     });
 
     const citedIds = new Set(q.citation_chunk_ids);

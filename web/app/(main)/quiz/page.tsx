@@ -80,6 +80,7 @@ function QuizInner({ mode }: { mode: Mode }) {
   const [records, setRecords] = useState<AnswerRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pendingResume, setPendingResume] = useState<PersistedSubjectSession | null>(null);
+  const [generatingAttempt, setGeneratingAttempt] = useState(0);
   const cancelledRef = useRef(false);
   const prefetchedForIndexRef = useRef<number | null>(null);
 
@@ -145,19 +146,18 @@ function QuizInner({ mode }: { mode: Mode }) {
    */
   const waitForNextSubjectQuestion = useCallback(
     async (excludeIds: number[]) => {
-      let announced = false;
       for (let attempt = 0; attempt < MAX_NEXT_ATTEMPTS && !cancelledRef.current; attempt++) {
         const { question, exhausted } = await requestNextQuestion(subject, excludeIds);
         if (question) return question;
         if (exhausted) {
           throw new Error("この科目はこれ以上出題できる問題がありません（上限に達しました）。");
         }
-        if (!announced) {
-          setPhase("generating");
-          announced = true;
-        }
+        setPhase("generating");
+        setGeneratingAttempt(attempt + 1);
       }
-      throw new Error("問題の生成に時間がかかりすぎています。時間をおいて再度お試しください。");
+      throw new Error(
+        "問題の生成に時間がかかりすぎています。この分野は教科書の記述から出題を作りにくく、生成のやり直しが続いている可能性があります。時間をおいて再度お試しください。",
+      );
     },
     [subject],
   );
@@ -182,6 +182,7 @@ function QuizInner({ mode }: { mode: Mode }) {
     setSelected([]);
 
     if (mode === "subject") {
+      setGeneratingAttempt(0);
       try {
         const first = await waitForNextSubjectQuestion([]);
         setQuestions([first]);
@@ -274,6 +275,7 @@ function QuizInner({ mode }: { mode: Mode }) {
       }
       setError(null);
       setPhase("loading");
+      setGeneratingAttempt(0);
       try {
         const excludeIds = questions.map((qq) => qq.id);
         const nextQ = await waitForNextSubjectQuestion(excludeIds);
@@ -395,8 +397,12 @@ function QuizInner({ mode }: { mode: Mode }) {
   if (phase === "generating") {
     return (
       <div className="space-y-3">
-        <p className="rounded bg-indigo-50 p-3 text-sm text-indigo-800">
+        <p className="rounded-xl bg-indigo-50 p-4 text-sm text-indigo-800">
           次の問題を生成中です。しばらくお待ちください...
+          <br />
+          <span className="text-xs text-indigo-600">
+            1回の生成に20〜60秒ほどかかることがあります（{generatingAttempt} / {MAX_NEXT_ATTEMPTS} 回目）
+          </span>
         </p>
       </div>
     );
