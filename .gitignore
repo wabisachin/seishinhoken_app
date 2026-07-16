@@ -1,0 +1,18 @@
+# データ・秘密情報
+data/
+.env
+*.env.local
+
+# PDF原本（サイズが大きいためgit管理外）
+text_pdf/
+exam_pdf/
+
+# Node
+node_modules/
+web/.next/
+web/next-env.d.ts
+.vercel/
+
+# Python
+__pycache__/
+*.pyc

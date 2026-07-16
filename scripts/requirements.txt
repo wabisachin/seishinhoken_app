@@ -1,0 +1,6 @@
+pymupdf>=1.26
+anthropic>=0.40
+voyageai>=0.3
+supabase>=2.0
+tqdm
+python-dotenv
