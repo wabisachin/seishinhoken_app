@@ -5,6 +5,8 @@ import type { LlmSettings } from "@/lib/types";
 
 type Preset = { provider: LlmSettings["provider"]; model: string; label: string };
 type ErrorLog = { id: number; source: string; message: string; detail: string | null; created_at: string };
+type UsageTotals = { inputTokens: number; cachedInputTokens: number; outputTokens: number; costUsd: number };
+type UsageByModel = UsageTotals & { provider: string; model: string };
 
 export default function AdminPage() {
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -18,6 +20,9 @@ export default function AdminPage() {
   const [resetMsg, setResetMsg] = useState<string | null>(null);
   const [errors, setErrors] = useState<ErrorLog[]>([]);
   const [expandedError, setExpandedError] = useState<number | null>(null);
+  const [usageTotals, setUsageTotals] = useState<UsageTotals | null>(null);
+  const [usageByModel, setUsageByModel] = useState<UsageByModel[]>([]);
+  const [usageCallCount, setUsageCallCount] = useState(0);
 
   useEffect(() => {
     fetch("/api/admin/status")
@@ -29,6 +34,7 @@ export default function AdminPage() {
     if (authed) {
       loadSettings();
       loadErrors();
+      loadUsage();
     }
   }, [authed]);
 
@@ -41,6 +47,23 @@ export default function AdminPage() {
   async function clearErrors() {
     await fetch("/api/admin/errors", { method: "DELETE" });
     setErrors([]);
+  }
+
+  function loadUsage() {
+    fetch("/api/admin/usage")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.totals) setUsageTotals(d.totals);
+        if (d.byModel) setUsageByModel(d.byModel);
+        if (typeof d.callCount === "number") setUsageCallCount(d.callCount);
+      });
+  }
+
+  async function clearUsage() {
+    await fetch("/api/admin/usage", { method: "DELETE" });
+    setUsageTotals(null);
+    setUsageByModel([]);
+    setUsageCallCount(0);
   }
 
   function loadSettings() {
@@ -154,6 +177,66 @@ export default function AdminPage() {
           })}
         </div>
         {saveMsg && <p className="mt-3 text-sm text-green-600">{saveMsg}</p>}
+      </section>
+
+      <section className="rounded-xl bg-white p-5 shadow">
+        <div className="flex items-center justify-between">
+          <h2 className="font-bold text-slate-700">トークン使用量・推定コスト（累積）</h2>
+          {usageCallCount > 0 && (
+            <button onClick={clearUsage} className="text-xs text-slate-400 hover:underline">
+              クリア
+            </button>
+          )}
+        </div>
+        <p className="mt-1 text-sm text-slate-500">
+          HyDE検索クエリ生成・問題生成・自己検証、それぞれのLLM呼び出しごとのトークン数から概算しています。
+          実際の請求額とは単価表の更新タイミングにより差が出ることがあります。
+        </p>
+        {!usageTotals || usageCallCount === 0 ? (
+          <p className="mt-3 text-sm text-slate-400">まだ記録がありません。</p>
+        ) : (
+          <>
+            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="rounded-lg bg-slate-50 p-3">
+                <p className="text-xs text-slate-500">推定コスト</p>
+                <p className="text-lg font-bold text-slate-800">${usageTotals.costUsd.toFixed(2)}</p>
+              </div>
+              <div className="rounded-lg bg-slate-50 p-3">
+                <p className="text-xs text-slate-500">LLM呼び出し回数</p>
+                <p className="text-lg font-bold text-slate-800">{usageCallCount.toLocaleString()}</p>
+              </div>
+              <div className="rounded-lg bg-slate-50 p-3">
+                <p className="text-xs text-slate-500">入力トークン</p>
+                <p className="text-lg font-bold text-slate-800">{usageTotals.inputTokens.toLocaleString()}</p>
+                <p className="text-xs text-slate-400">うちキャッシュ {usageTotals.cachedInputTokens.toLocaleString()}</p>
+              </div>
+              <div className="rounded-lg bg-slate-50 p-3">
+                <p className="text-xs text-slate-500">出力トークン</p>
+                <p className="text-lg font-bold text-slate-800">{usageTotals.outputTokens.toLocaleString()}</p>
+              </div>
+            </div>
+            <table className="mt-4 w-full text-sm">
+              <thead className="bg-slate-100 text-left">
+                <tr>
+                  <th className="px-3 py-1.5">モデル</th>
+                  <th className="px-3 py-1.5 text-right">入力</th>
+                  <th className="px-3 py-1.5 text-right">出力</th>
+                  <th className="px-3 py-1.5 text-right">推定コスト</th>
+                </tr>
+              </thead>
+              <tbody>
+                {usageByModel.map((m) => (
+                  <tr key={`${m.provider}:${m.model}`} className="border-t border-slate-100">
+                    <td className="px-3 py-1.5">{m.model}</td>
+                    <td className="px-3 py-1.5 text-right">{m.inputTokens.toLocaleString()}</td>
+                    <td className="px-3 py-1.5 text-right">{m.outputTokens.toLocaleString()}</td>
+                    <td className="px-3 py-1.5 text-right font-medium">${m.costUsd.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
       </section>
 
       <section className="rounded-xl bg-white p-5 shadow">

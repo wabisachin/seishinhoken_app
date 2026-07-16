@@ -4,6 +4,7 @@ import { getModel } from "./llm";
 import { supabase } from "./supabase";
 import { retrieveForItem, RetrievedChunk, TaxonomyItem } from "./retrieval";
 import { getLlmSettings } from "./appSettings";
+import { logUsage } from "./usageLog";
 
 /**
  * プロンプトキャッシング対策: 同じ項目に対する生成1〜2回目・検証呼び出しは
@@ -194,7 +195,7 @@ ${pastExcerpts.length ? pastExcerpts.map((e, i) => `${i + 1}. ${e}...`).join("\n
     const retryNote = lastProblems.length
       ? `\n\n# 前回生成の問題点（必ず修正すること）\n- ${lastProblems.join("\n- ")}`
       : "";
-    const { object: q } = await generateObject({
+    const { object: q, usage: generateUsage } = await generateObject({
       model,
       schema: questionSchema,
       prompt: [
@@ -204,6 +205,7 @@ ${pastExcerpts.length ? pastExcerpts.map((e, i) => `${i + 1}. ${e}...`).join("\n
         },
       ],
     });
+    await logUsage({ source: "generate", subject, provider: llm.provider, model: modelName, usage: generateUsage });
 
     // 形式チェック
     const formatProblems: string[] = [];
@@ -233,7 +235,7 @@ ${chunkBlock(neighbor)}`;
 ${q.case_text ? `〔事例〕${q.case_text}\n` : ""}${q.stem}
 ${optionsList}
 正答: ${q.correct.join(", ")}`;
-    const { object: verdict } = await generateObject({
+    const { object: verdict, usage: verifyUsage } = await generateObject({
       model,
       schema: verifySchema,
       prompt: [
@@ -243,6 +245,7 @@ ${optionsList}
         },
       ],
     });
+    await logUsage({ source: "verify", subject, provider: llm.provider, model: modelName, usage: verifyUsage });
 
     const citedIds = new Set(q.citation_chunk_ids);
     const allChunks = [...main, ...neighbor];
