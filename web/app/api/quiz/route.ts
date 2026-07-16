@@ -46,10 +46,12 @@ export async function GET(req: NextRequest) {
     }
 
     if (mode === "review") {
-      // 全attemptsを新しい順に取得し、問題ごとの最新解答が誤答のものを対象にする
+      // 全attemptsを新しい順に取得し、問題ごとの最新解答が誤答のものを対象にする。
+      // 本人(profile='self')の解答だけを対象にし、保護者・テスターの解答は無視する
       const { data: attempts, error } = await sb
         .from("attempts")
         .select("question_id, is_correct, answered_at")
+        .eq("profile", "self")
         .order("answered_at", { ascending: false });
       if (error) throw new Error(error.message);
       const latest = new Map<number, boolean>();

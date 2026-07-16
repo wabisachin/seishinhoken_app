@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { Question } from "@/lib/types";
 import { dedupeCitations } from "@/lib/citations";
+import { getStoredProfile } from "@/lib/profile";
 
 const PAGE_SIZE = 3;
 const STORAGE_KEY = "quiz_session_mock_v1";
@@ -235,7 +236,7 @@ export default function MockQuiz() {
           const res = await fetch("/api/attempts", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ question_id: q.id, selected, mode: "mock" }),
+            body: JSON.stringify({ question_id: q.id, selected, mode: "mock", profile: getStoredProfile() ?? "self" }),
           });
           const d = await res.json();
           return { id: q.id, selected, isCorrect: !!d.is_correct };

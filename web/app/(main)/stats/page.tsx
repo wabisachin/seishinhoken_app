@@ -13,8 +13,22 @@ import {
   YAxis,
 } from "recharts";
 
-type SubjectStat = { subject: string; attempts: number; correct: number; accuracy: number };
+type Summary = {
+  totalAttempts: number;
+  totalCorrect: number;
+  overallAccuracy: number;
+  recentAttempts: number;
+  subjectsPracticed: number;
+  totalSubjects: number;
+};
+type SubjectStat = { subject: string; kind: string | null; attempts: number; correct: number; accuracy: number };
+type KindStat = { kind: string; attempts: number; correct: number; accuracy: number };
 type TimelineRow = { day: string; attempts: number; accuracy: number };
+type MonthlyRow = { month: string; attempts: number; accuracy: number };
+
+const KIND_LABEL: Record<string, string> = { common: "共通科目", specialized: "専門科目", other: "その他" };
+// 1〜2回だけ答えた科目がたまたま得意/苦手TOPに出てしまわないよう、最低解答数を設ける
+const MIN_ATTEMPTS_FOR_RANKING = 3;
 
 // 科目名は長いものだと30文字を超え、グラフの縦軸幅にはとても収まらない。
 // SVGは自動で折り返したり省略記号を付けたりしないため、放置すると単に途中で
@@ -30,9 +44,17 @@ function SubjectAxisTick({ x, y, payload }: { x: number; y: number; payload: { v
   );
 }
 
+function formatMonth(month: string) {
+  const [y, m] = month.split("-");
+  return `${y}年${parseInt(m, 10)}月`;
+}
+
 export default function StatsPage() {
+  const [summary, setSummary] = useState<Summary | null>(null);
   const [bySubject, setBySubject] = useState<SubjectStat[]>([]);
+  const [byKind, setByKind] = useState<KindStat[]>([]);
   const [timeline, setTimeline] = useState<TimelineRow[]>([]);
+  const [monthly, setMonthly] = useState<MonthlyRow[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -41,8 +63,11 @@ export default function StatsPage() {
       .then((d) => {
         if (d.error) setError(d.error);
         else {
+          setSummary(d.summary);
           setBySubject(d.bySubject);
+          setByKind(d.byKind ?? []);
           setTimeline(d.timeline);
+          setMonthly(d.monthly);
         }
       })
       .catch((e) => setError(String(e)));
@@ -55,6 +80,85 @@ export default function StatsPage() {
   return (
     <div className="space-y-6">
       <h1 className="text-xl font-bold">成績</h1>
+
+      {summary && (
+        <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="rounded-2xl bg-white p-4 shadow-warm">
+            <p className="text-xs text-stone-500">総合正答率</p>
+            <p className="text-2xl font-bold text-indigo-700">{summary.overallAccuracy}%</p>
+          </div>
+          <div className="rounded-2xl bg-white p-4 shadow-warm">
+            <p className="text-xs text-stone-500">総解答数</p>
+            <p className="text-2xl font-bold text-stone-800">{summary.totalAttempts.toLocaleString()}問</p>
+          </div>
+          <div className="rounded-2xl bg-white p-4 shadow-warm">
+            <p className="text-xs text-stone-500">直近7日間</p>
+            <p className="text-2xl font-bold text-stone-800">{summary.recentAttempts.toLocaleString()}問</p>
+          </div>
+          <div className="rounded-2xl bg-white p-4 shadow-warm">
+            <p className="text-xs text-stone-500">取り組んだ科目</p>
+            <p className="text-2xl font-bold text-stone-800">
+              {summary.subjectsPracticed}
+              <span className="text-sm font-normal text-stone-400"> / {summary.totalSubjects}</span>
+            </p>
+          </div>
+        </section>
+      )}
+
+      {byKind.length > 0 && (
+        <section className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {byKind.map((k) => (
+            <div key={k.kind} className="rounded-2xl bg-white p-4 shadow-warm">
+              <p className="text-xs text-stone-500">{KIND_LABEL[k.kind] ?? k.kind}</p>
+              <div className="mt-1 flex items-baseline gap-2">
+                <p className={`text-2xl font-bold ${k.accuracy >= 60 ? "text-green-600" : "text-red-600"}`}>
+                  {k.accuracy}%
+                </p>
+                <p className="text-xs text-stone-400">{k.correct}/{k.attempts}問</p>
+              </div>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-stone-100">
+                <div
+                  className={`h-full rounded-full ${k.accuracy >= 60 ? "bg-green-500" : "bg-red-400"}`}
+                  style={{ width: `${Math.min(100, k.accuracy)}%` }}
+                />
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {(() => {
+        const ranked = bySubject.filter((s) => s.attempts >= MIN_ATTEMPTS_FOR_RANKING);
+        if (ranked.length === 0) return null;
+        const weakest = ranked.slice(0, 3);
+        const strongest = [...ranked].reverse().slice(0, 3);
+        return (
+          <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="rounded-2xl bg-white p-4 shadow-warm">
+              <h2 className="mb-2 font-bold text-red-700">苦手科目 TOP3</h2>
+              <ul className="space-y-1.5 text-sm">
+                {weakest.map((s, i) => (
+                  <li key={s.subject} className="flex items-center justify-between gap-2">
+                    <span className="truncate text-stone-700">{i + 1}. {s.subject}</span>
+                    <span className="shrink-0 font-medium text-red-600">{s.accuracy}%</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="rounded-2xl bg-white p-4 shadow-warm">
+              <h2 className="mb-2 font-bold text-green-700">得意科目 TOP3</h2>
+              <ul className="space-y-1.5 text-sm">
+                {strongest.map((s, i) => (
+                  <li key={s.subject} className="flex items-center justify-between gap-2">
+                    <span className="truncate text-stone-700">{i + 1}. {s.subject}</span>
+                    <span className="shrink-0 font-medium text-green-600">{s.accuracy}%</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </section>
+        );
+      })()}
 
       <section className="rounded-2xl bg-white p-4 shadow-warm sm:p-5">
         <h2 className="mb-3 font-bold text-indigo-700">科目別正答率（苦手順）</h2>
@@ -113,9 +217,30 @@ export default function StatsPage() {
         <p className="mt-2 text-xs text-stone-400">※ 本番の合格基準は総得点の約60%（+全科目群で得点）</p>
       </section>
 
+      {monthly.length > 0 && (
+        <section className="rounded-2xl bg-white p-5 shadow-warm">
+          <h2 className="mb-3 font-bold text-indigo-700">月ごとの正答率推移</h2>
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={monthly}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="month" tickFormatter={formatMonth} tick={{ fontSize: 11 }} />
+              <YAxis domain={[0, 100]} unit="%" />
+              <Tooltip
+                labelFormatter={(label: string) => formatMonth(label)}
+                formatter={(v: number, name: string) => (name === "accuracy" ? [`${v}%`, "正答率"] : [v, name])}
+              />
+              <Bar dataKey="accuracy" name="正答率" fill="#7c3aed" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+          <p className="mt-2 text-xs text-stone-400">
+            {monthly.map((m) => `${formatMonth(m.month)}: ${m.attempts}問`).join(" / ")}
+          </p>
+        </section>
+      )}
+
       {timeline.length > 1 && (
         <section className="rounded-2xl bg-white p-5 shadow-warm">
-          <h2 className="mb-3 font-bold text-indigo-700">正答率の推移</h2>
+          <h2 className="mb-3 font-bold text-indigo-700">日ごとの正答率推移</h2>
           <ResponsiveContainer width="100%" height={260}>
             <LineChart data={timeline}>
               <CartesianGrid strokeDasharray="3 3" />

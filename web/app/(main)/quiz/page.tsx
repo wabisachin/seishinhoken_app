@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import type { Mode, Question } from "@/lib/types";
 import { dedupeCitations } from "@/lib/citations";
+import { getStoredProfile } from "@/lib/profile";
 import MockQuiz from "./MockQuiz";
 
 type Phase =
@@ -249,7 +250,7 @@ function QuizInner({ mode }: { mode: Mode }) {
     const res = await fetch("/api/attempts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question_id: q.id, selected, mode }),
+      body: JSON.stringify({ question_id: q.id, selected, mode, profile: getStoredProfile() ?? "self" }),
     });
     const d = await res.json();
     if (d.error) {

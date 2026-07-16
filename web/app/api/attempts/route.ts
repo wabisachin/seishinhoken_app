@@ -5,10 +5,13 @@ import { logError } from "@/lib/errorLog";
 /** 解答を記録する。正誤判定はサーバー側でDBのcorrectと照合して行う */
 export async function POST(req: NextRequest) {
   try {
-    const { question_id, selected, mode } = await req.json();
+    const { question_id, selected, mode, profile } = await req.json();
     if (!question_id || !Array.isArray(selected) || !mode) {
       return NextResponse.json({ error: "question_id, selected[], mode are required" }, { status: 400 });
     }
+    // 本人・保護者・テスターが同時にアプリを使っても回答履歴が混ざらないよう、
+    // クライアントの自己申告区分をそのまま記録する（不明な値は自己申告なし扱い）
+    const safeProfile = profile === "self" || profile === "guardian" ? profile : "self";
     const sb = supabase();
     const { data: q, error } = await sb
       .from("questions")
@@ -26,6 +29,7 @@ export async function POST(req: NextRequest) {
       selected: chosen,
       is_correct: isCorrect,
       mode,
+      profile: safeProfile,
     });
     if (insError) throw new Error(insError.message);
 
