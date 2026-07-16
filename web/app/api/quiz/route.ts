@@ -20,9 +20,11 @@ const QUESTION_COLS =
 /**
  * 出題セットを返す。
  * mode=subject: 指定科目からランダム
- * mode=mock:    プールがある全科目から均等に perSubject 問（既定3問）ずつ、
- *               共通課程→専門課程の順にまとめてサンプリング
  * mode=review:  最後の解答が誤答だった問題を優先
+ *
+ * mode=mockはここには無い。ミニ模試も分野別演習と同じ生成ロジック
+ * （questionSupply.tsのgetOrGenerateNext）を使うため、MockQuiz.tsxから
+ * /api/subjects で科目一覧を取り、/api/quiz/next を科目ごとに直接呼んでいる。
  */
 export async function GET(req: NextRequest) {
   try {
@@ -41,38 +43,6 @@ export async function GET(req: NextRequest) {
         .eq("status", "active");
       if (error) throw new Error(error.message);
       return NextResponse.json({ questions: shuffle(data as Question[]).slice(0, count) });
-    }
-
-    if (mode === "mock") {
-      const perSubject = Math.min(Math.max(parseInt(params.get("perSubject") ?? "3", 10), 1), 10);
-
-      // 科目ごとの課程区分（共通/専門）。past_questionsに載っている科目名基準。
-      const { data: pastSubjects } = await sb.from("past_questions").select("subject, kind");
-      const kindMap = new Map<string, string | null>();
-      for (const row of pastSubjects ?? []) kindMap.set(row.subject, row.kind);
-
-      const { data: pool, error } = await sb.from("questions").select(QUESTION_COLS).eq("status", "active");
-      if (error) throw new Error(error.message);
-      const bySubject = new Map<string, Question[]>();
-      for (const q of (pool ?? []) as Question[]) {
-        if (!bySubject.has(q.subject)) bySubject.set(q.subject, []);
-        bySubject.get(q.subject)!.push(q);
-      }
-
-      // 共通課程→専門課程→その他の順に並べ、各科目のperSubject問がページ単位で
-      // まとまって出るようにする（1ページ=3問なら1ページ=1科目になる）
-      const kindRank = (k: string | null | undefined) => (k === "common" ? 0 : k === "specialized" ? 1 : 2);
-      const subjects = [...bySubject.keys()].sort((a, b) => {
-        const ra = kindRank(kindMap.get(a));
-        const rb = kindRank(kindMap.get(b));
-        return ra !== rb ? ra - rb : a.localeCompare(b, "ja");
-      });
-
-      const picked: Question[] = [];
-      for (const subject of subjects) {
-        picked.push(...shuffle(bySubject.get(subject)!).slice(0, perSubject));
-      }
-      return NextResponse.json({ questions: picked });
     }
 
     if (mode === "review") {

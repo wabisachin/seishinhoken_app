@@ -1,15 +1,29 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { Question } from "@/lib/types";
 import { dedupeCitations } from "@/lib/citations";
 
 const PAGE_SIZE = 3;
 const STORAGE_KEY = "quiz_session_mock_v1";
+// 1科目ぶん(PAGE_SIZE問)を集めるための、1問あたりの生成リトライ上限
+// （分野別演習と同じ /api/quiz/next を使っており、却下が続く場合の保険も同じ考え方）
+const MAX_NEXT_ATTEMPTS = 15;
+
+// 本番の試験は午前(共通科目・社会福祉士と合同)/午後(専門科目・精神保健福祉士のみ)の
+// 2部制（exam_pdfのsource_fileで sp_am_*=common, se_pm_*=specialized と確認済み）。
+// ミニ模試もそれに合わせ、どちらを受けるか選んでもらう。
+type SessionKind = "common" | "specialized";
+const SESSION_LABEL: Record<SessionKind, string> = {
+  common: "午前の部（共通科目）",
+  specialized: "午後の部（専門科目）",
+};
 
 type Answer = { selected: number[]; isCorrect: boolean };
 type Persisted = {
+  sessionKind: SessionKind;
+  subjectOrder: string[];
   questions: Question[];
   answers: Record<number, Answer>;
   page: number;
@@ -32,10 +46,83 @@ function clearPersisted() {
   localStorage.removeItem(STORAGE_KEY);
 }
 
-type Phase = "checking" | "resume-prompt" | "loading" | "answering" | "finished" | "empty";
+async function requestNextQuestion(
+  subject: string,
+  excludeIds: number[],
+): Promise<{ question: Question | null; exhausted: boolean }> {
+  const res = await fetch("/api/quiz/next", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ subject, excludeIds }),
+  });
+  const d = await res.json();
+  if (d.error) throw new Error(d.error);
+  return { question: (d.question as Question | null) ?? null, exhausted: !!d.exhausted };
+}
+
+/**
+ * 全分野ミニ模試も分野別演習と全く同じロジック（questionSupply.ts の
+ * getOrGenerateNext）で1科目ぶんを揃える。過去に貯まった問題を並べるのではなく、
+ * その科目のアクティブ問題数に応じて「50問まで毎回新規／200問到達で新規停止」の
+ * 同じ確率で新規生成するかどうかが決まる。1ページ=1科目のPAGE_SIZE問を、
+ * 科目内で重複しないよう逐次（順番に）取得する。
+ */
+async function fetchSubjectBatch(
+  subject: string,
+  count: number,
+  onAttempt: ((n: number) => void) | null,
+): Promise<Question[]> {
+  const picked: Question[] = [];
+  const excludeIds: number[] = [];
+  for (let slot = 0; slot < count; slot++) {
+    let gotSlot = false;
+    for (let attempt = 0; attempt < MAX_NEXT_ATTEMPTS; attempt++) {
+      const { question, exhausted } = await requestNextQuestion(subject, excludeIds);
+      if (question) {
+        picked.push(question);
+        excludeIds.push(question.id);
+        gotSlot = true;
+        break;
+      }
+      if (exhausted) {
+        // この科目はこれ以上出せない。今集まっている分だけで妥協する
+        gotSlot = true;
+        break;
+      }
+      onAttempt?.(attempt + 1);
+    }
+    if (!gotSlot) {
+      throw new Error(`「${subject}」の出題準備に時間がかかりすぎています。時間をおいて再度お試しください。`);
+    }
+    if (picked.length <= slot) break; // exhaustedで打ち切られた場合、これ以上slotを増やしても無駄
+  }
+  return picked;
+}
+
+async function fetchSubjectOrder(sessionKind: SessionKind): Promise<string[]> {
+  const res = await fetch("/api/subjects");
+  const d = await res.json();
+  const subjects = (d.subjects ?? []) as { subject: string; kind: string | null; taxonomy_items: number }[];
+  return subjects
+    .filter((s) => s.taxonomy_items > 0 && s.kind === sessionKind)
+    .sort((a, b) => a.subject.localeCompare(b.subject, "ja"))
+    .map((s) => s.subject);
+}
+
+type Phase =
+  | "checking"
+  | "select-session"
+  | "resume-prompt"
+  | "loading"
+  | "generating"
+  | "answering"
+  | "finished"
+  | "empty";
 
 export default function MockQuiz() {
   const [phase, setPhase] = useState<Phase>("checking");
+  const [sessionKind, setSessionKind] = useState<SessionKind>("common");
+  const [subjectOrder, setSubjectOrder] = useState<string[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [answers, setAnswers] = useState<Record<number, Answer>>({});
   const [page, setPage] = useState(0);
@@ -44,6 +131,9 @@ export default function MockQuiz() {
   const [pendingResume, setPendingResume] = useState<Persisted | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [generatingAttempt, setGeneratingAttempt] = useState(0);
+  const prefetchedForPageRef = useRef<number | null>(null);
+  const prefetchPromiseRef = useRef<Promise<Question[] | null> | null>(null);
 
   useEffect(() => {
     const persisted = loadPersisted();
@@ -52,32 +142,50 @@ export default function MockQuiz() {
       setPendingResume(persisted);
       setPhase("resume-prompt");
     } else {
-      void startFresh();
+      setPhase("select-session");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function startFresh() {
+  async function startFresh(kind: SessionKind) {
     clearPersisted();
+    setSessionKind(kind);
     setPhase("loading");
     setError(null);
-    const res = await fetch(`/api/quiz?mode=mock&perSubject=${PAGE_SIZE}`);
-    const d = await res.json();
-    if (d.error || !d.questions || d.questions.length === 0) {
-      setError(d.error ?? "問題プールが空です。分野別演習で問題を生成してから試してください。");
+    setGeneratingAttempt(0);
+    try {
+      const order = await fetchSubjectOrder(kind);
+      if (order.length === 0) {
+        setError("出題できる科目がありません。");
+        setPhase("empty");
+        return;
+      }
+      setSubjectOrder(order);
+      const first = await fetchSubjectBatch(order[0], PAGE_SIZE, (n) => {
+        setPhase("generating");
+        setGeneratingAttempt(n);
+      });
+      if (first.length === 0) {
+        setError("問題プールが空です。分野別演習で問題を生成してから試してください。");
+        setPhase("empty");
+        return;
+      }
+      setQuestions(first);
+      setAnswers({});
+      setPage(0);
+      setDraft({});
+      savePersisted({ sessionKind: kind, subjectOrder: order, questions: first, answers: {}, page: 0, savedAt: Date.now() });
+      setPhase("answering");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
       setPhase("empty");
-      return;
     }
-    setQuestions(d.questions);
-    setAnswers({});
-    setPage(0);
-    setDraft({});
-    savePersisted({ questions: d.questions, answers: {}, page: 0, savedAt: Date.now() });
-    setPhase("answering");
   }
 
   function resume() {
     if (!pendingResume) return;
+    setSessionKind(pendingResume.sessionKind);
+    setSubjectOrder(pendingResume.subjectOrder);
     setQuestions(pendingResume.questions);
     setAnswers(pendingResume.answers);
     setPage(pendingResume.page);
@@ -87,7 +195,7 @@ export default function MockQuiz() {
 
   function discardAndStart() {
     setPendingResume(null);
-    void startFresh();
+    setPhase("select-session");
   }
 
   function toggle(q: Question, n: number) {
@@ -104,7 +212,19 @@ export default function MockQuiz() {
 
   const pageQuestions = questions.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
   const canProceed = pageQuestions.length > 0 && pageQuestions.every((q) => (draft[q.id]?.length ?? 0) > 0);
-  const isLastPage = (page + 1) * PAGE_SIZE >= questions.length;
+  const isLastPage = page + 1 >= subjectOrder.length;
+
+  // 今のページを解いている間に、裏で次の科目の3問を用意しておく
+  useEffect(() => {
+    if (phase !== "answering") return;
+    if (isLastPage) return;
+    if (prefetchedForPageRef.current === page) return;
+    prefetchedForPageRef.current = page;
+    const nextSubject = subjectOrder[page + 1];
+    if (!nextSubject) return;
+    prefetchPromiseRef.current = fetchSubjectBatch(nextSubject, PAGE_SIZE, null).catch(() => null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, page, isLastPage, subjectOrder]);
 
   async function submitPage() {
     setSubmitting(true);
@@ -128,13 +248,33 @@ export default function MockQuiz() {
       if (isLastPage) {
         clearPersisted();
         setPhase("finished");
-      } else {
-        const nextPage = page + 1;
-        setPage(nextPage);
-        setDraft({});
-        savePersisted({ questions, answers: nextAnswers, page: nextPage, savedAt: Date.now() });
-        setPhase("answering");
+        return;
       }
+
+      setSubmitting(false);
+      setError(null);
+      setPhase("loading");
+      setGeneratingAttempt(0);
+      const prefetched = prefetchPromiseRef.current;
+      prefetchPromiseRef.current = null;
+      const prefetchedBatch = prefetched ? await prefetched : null;
+      const nextSubject = subjectOrder[page + 1];
+      const nextBatch =
+        prefetchedBatch ??
+        (await fetchSubjectBatch(nextSubject, PAGE_SIZE, (n) => {
+          setPhase("generating");
+          setGeneratingAttempt(n);
+        }));
+      const nextQuestions = [...questions, ...nextBatch];
+      const nextPage = page + 1;
+      setQuestions(nextQuestions);
+      setPage(nextPage);
+      setDraft({});
+      savePersisted({ sessionKind, subjectOrder, questions: nextQuestions, answers: nextAnswers, page: nextPage, savedAt: Date.now() });
+      setPhase("answering");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setPhase("answering");
     } finally {
       setSubmitting(false);
     }
@@ -142,11 +282,38 @@ export default function MockQuiz() {
 
   if (phase === "checking") return null;
 
+  if (phase === "select-session") {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-xl font-bold">全分野ミニ模試</h1>
+        <p className="text-sm text-stone-600">
+          本番の試験は午前（共通科目・社会福祉士と合同）と午後（専門科目）の2部制です。どちらを受けますか？
+        </p>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <button
+            onClick={() => void startFresh("common")}
+            className="rounded-2xl border-l-4 border-indigo-400 bg-white p-5 text-left shadow-warm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-warm-lg"
+          >
+            <h2 className="font-bold text-indigo-700">{SESSION_LABEL.common}</h2>
+            <p className="mt-1 text-sm text-stone-600">社会福祉士と共通の科目。ソーシャルワークの基盤、医学概論、社会保障など。</p>
+          </button>
+          <button
+            onClick={() => void startFresh("specialized")}
+            className="rounded-2xl border-l-4 border-violet-400 bg-white p-5 text-left shadow-warm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-warm-lg"
+          >
+            <h2 className="font-bold text-violet-700">{SESSION_LABEL.specialized}</h2>
+            <p className="mt-1 text-sm text-stone-600">精神保健福祉士のみの専門科目。精神医学、精神保健福祉の原理など。</p>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (phase === "resume-prompt" && pendingResume) {
     const done = Object.keys(pendingResume.answers).length;
     return (
       <div className="space-y-4">
-        <h1 className="text-xl font-bold">全分野ミニ模試</h1>
+        <h1 className="text-xl font-bold">全分野ミニ模試（{SESSION_LABEL[pendingResume.sessionKind]}）</h1>
         <div className="rounded-2xl bg-amber-50 p-5 shadow-warm">
           <p className="text-sm text-amber-800">
             前回途中だった模試があります（{done} / {pendingResume.questions.length} 問まで解答済み）。続きから再開しますか？
@@ -171,6 +338,20 @@ export default function MockQuiz() {
   }
 
   if (phase === "loading") return <p>出題を準備中...</p>;
+
+  if (phase === "generating") {
+    return (
+      <div className="space-y-3">
+        <p className="rounded-xl bg-indigo-50 p-4 text-sm text-indigo-800">
+          次の科目の問題を生成中です。しばらくお待ちください...
+          <br />
+          <span className="text-xs text-indigo-600">
+            1回の生成に20〜60秒ほどかかることがあります（{generatingAttempt} / {MAX_NEXT_ATTEMPTS} 回目）
+          </span>
+        </p>
+      </div>
+    );
+  }
 
   if (phase === "empty") {
     return (
@@ -201,7 +382,7 @@ export default function MockQuiz() {
 
     return (
       <div className="space-y-4">
-        <h1 className="text-xl font-bold">模試結果</h1>
+        <h1 className="text-xl font-bold">模試結果（{SESSION_LABEL[sessionKind]}）</h1>
         <div className="rounded-2xl bg-white p-6 text-center shadow-warm">
           <p className="text-4xl font-bold text-indigo-700">
             {overallCorrect} / {overallTotal}
@@ -332,7 +513,7 @@ export default function MockQuiz() {
 
         <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
           <button
-            onClick={() => void startFresh()}
+            onClick={() => setPhase("select-session")}
             className="min-h-12 rounded-xl bg-indigo-600 px-5 py-3 font-medium text-white transition-colors hover:bg-indigo-700"
           >
             もう一度
@@ -351,10 +532,11 @@ export default function MockQuiz() {
   // --- answering: 3問まとめて表示、即時フィードバック無し ---
   return (
     <div className="space-y-4 pb-24 sm:pb-0">
+      <h1 className="text-lg font-bold">全分野ミニ模試（{SESSION_LABEL[sessionKind]}）</h1>
       <div className="flex items-center justify-between text-sm text-stone-500">
         <span>
-          {Math.min(page * PAGE_SIZE + 1, questions.length)}〜{Math.min((page + 1) * PAGE_SIZE, questions.length)} /{" "}
-          {questions.length} 問目
+          {page + 1} / {subjectOrder.length} 分野目
+          <span className="ml-3 rounded bg-stone-200 px-2 py-0.5 text-xs">{subjectOrder[page]}</span>
         </span>
         <span className="hidden sm:inline">結果はまとめて最後に表示されます</span>
       </div>
