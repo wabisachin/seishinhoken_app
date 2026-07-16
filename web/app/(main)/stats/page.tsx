@@ -16,6 +16,20 @@ import {
 type SubjectStat = { subject: string; attempts: number; correct: number; accuracy: number };
 type TimelineRow = { day: string; attempts: number; accuracy: number };
 
+// 科目名は長いものだと30文字を超え、グラフの縦軸幅にはとても収まらない。
+// SVGは自動で折り返したり省略記号を付けたりしないため、放置すると単に途中で
+// 切れて見える。ここで明示的に省略し、全文はホバー時のTooltip・下の表/カードで見せる。
+const AXIS_MAX_CHARS = 10;
+function SubjectAxisTick({ x, y, payload }: { x: number; y: number; payload: { value: string } }) {
+  const label = payload.value;
+  const display = label.length > AXIS_MAX_CHARS ? `${label.slice(0, AXIS_MAX_CHARS - 1)}…` : label;
+  return (
+    <text x={x} y={y} dy={3} textAnchor="end" fontSize={10} fill="#57534e">
+      {display}
+    </text>
+  );
+}
+
 export default function StatsPage() {
   const [bySubject, setBySubject] = useState<SubjectStat[]>([]);
   const [timeline, setTimeline] = useState<TimelineRow[]>([]);
@@ -48,8 +62,8 @@ export default function StatsPage() {
           <BarChart data={bySubject} layout="vertical" margin={{ left: 0, right: 16 }}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis type="number" domain={[0, 100]} unit="%" />
-            <YAxis type="category" dataKey="subject" width={120} tick={{ fontSize: 10 }} />
-            <Tooltip formatter={(v: number) => [`${v}%`, "正答率"]} />
+            <YAxis type="category" dataKey="subject" width={110} tick={<SubjectAxisTick x={0} y={0} payload={{ value: "" }} />} />
+            <Tooltip formatter={(v: number) => [`${v}%`, "正答率"]} labelFormatter={(label: string) => label} />
             <Bar dataKey="accuracy" fill="#4f46e5" radius={[0, 4, 4, 0]} />
           </BarChart>
         </ResponsiveContainer>
