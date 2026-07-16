@@ -133,8 +133,48 @@ export default function MockQuiz() {
   const [submitting, setSubmitting] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [generatingAttempt, setGeneratingAttempt] = useState(0);
-  const prefetchedForPageRef = useRef<number | null>(null);
-  const prefetchPromiseRef = useRef<Promise<Question[] | null> | null>(null);
+  // 科目ごとに1回だけ取得を開始し、結果(または進行中のPromise)をキャッシュする。
+  // ページ送りのたびに「その場で次を生成」するのではなく、模試が始まったら
+  // バックグラウンドのランナーが最後の科目まで順番に生成を進め続けるため、
+  // ユーザーが今の3問を解いている間に何ページも先まで用意が進む。
+  const batchCacheRef = useRef<Map<string, Promise<Question[]>>>(new Map());
+  const runnerActiveRef = useRef(false);
+  const cancelledRef = useRef(false);
+
+  function ensureBatchStarted(subject: string, onAttempt: ((n: number) => void) | null = null): Promise<Question[]> {
+    let p = batchCacheRef.current.get(subject);
+    if (!p) {
+      p = fetchSubjectBatch(subject, PAGE_SIZE, onAttempt).catch((e) => {
+        // 失敗をキャッシュしたままにすると、実際にそのページへ来た時も
+        // リトライ無しで即エラーになってしまう。消しておいて次回は新規に試みさせる
+        batchCacheRef.current.delete(subject);
+        throw e;
+      });
+      batchCacheRef.current.set(subject, p);
+    }
+    return p;
+  }
+
+  async function runBackgroundRunner(order: string[], startIndex: number) {
+    if (runnerActiveRef.current) return;
+    runnerActiveRef.current = true;
+    for (let i = startIndex; i < order.length; i++) {
+      if (cancelledRef.current) break;
+      try {
+        await ensureBatchStarted(order[i]);
+      } catch {
+        // 失敗はここでは無視する。実際にそのページへ進む時にforeground側が再試行・エラー表示する
+      }
+    }
+    runnerActiveRef.current = false;
+  }
+
+  useEffect(() => {
+    cancelledRef.current = false;
+    return () => {
+      cancelledRef.current = true;
+    };
+  }, []);
 
   useEffect(() => {
     const persisted = loadPersisted();
@@ -177,6 +217,7 @@ export default function MockQuiz() {
       setDraft({});
       savePersisted({ sessionKind: kind, subjectOrder: order, questions: first, answers: {}, page: 0, savedAt: Date.now() });
       setPhase("answering");
+      void runBackgroundRunner(order, 1);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setPhase("empty");
@@ -192,6 +233,7 @@ export default function MockQuiz() {
     setPage(pendingResume.page);
     setDraft({});
     setPhase("answering");
+    void runBackgroundRunner(pendingResume.subjectOrder, pendingResume.page + 1);
   }
 
   function discardAndStart() {
@@ -214,18 +256,6 @@ export default function MockQuiz() {
   const pageQuestions = questions.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
   const canProceed = pageQuestions.length > 0 && pageQuestions.every((q) => (draft[q.id]?.length ?? 0) > 0);
   const isLastPage = page + 1 >= subjectOrder.length;
-
-  // 今のページを解いている間に、裏で次の科目の3問を用意しておく
-  useEffect(() => {
-    if (phase !== "answering") return;
-    if (isLastPage) return;
-    if (prefetchedForPageRef.current === page) return;
-    prefetchedForPageRef.current = page;
-    const nextSubject = subjectOrder[page + 1];
-    if (!nextSubject) return;
-    prefetchPromiseRef.current = fetchSubjectBatch(nextSubject, PAGE_SIZE, null).catch(() => null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, page, isLastPage, subjectOrder]);
 
   async function submitPage() {
     setSubmitting(true);
@@ -256,16 +286,13 @@ export default function MockQuiz() {
       setError(null);
       setPhase("loading");
       setGeneratingAttempt(0);
-      const prefetched = prefetchPromiseRef.current;
-      prefetchPromiseRef.current = null;
-      const prefetchedBatch = prefetched ? await prefetched : null;
       const nextSubject = subjectOrder[page + 1];
-      const nextBatch =
-        prefetchedBatch ??
-        (await fetchSubjectBatch(nextSubject, PAGE_SIZE, (n) => {
-          setPhase("generating");
-          setGeneratingAttempt(n);
-        }));
+      // バックグラウンドランナーが既に用意できていれば即座に返る。まだなら
+      // （ユーザーが解答が早く、ランナーがまだそこまで追いついていない場合）ここで待つ
+      const nextBatch = await ensureBatchStarted(nextSubject, (n) => {
+        setPhase("generating");
+        setGeneratingAttempt(n);
+      });
       const nextQuestions = [...questions, ...nextBatch];
       const nextPage = page + 1;
       setQuestions(nextQuestions);
