@@ -21,10 +21,10 @@ export default function ProfileBadge() {
   return (
     <button
       onClick={switchProfile}
-      className="rounded-full bg-white/15 px-3 py-1 text-xs text-indigo-50 transition-colors hover:bg-white/25"
-      title="タップして切り替え"
+      className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-full bg-white/20 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-white/30"
     >
-      {profile === "self" ? "ご本人" : "応援する人"} ▾
+      <span aria-hidden>⇄</span>
+      {profile === "self" ? "ご本人" : "応援する人"}
     </button>
   );
 }
