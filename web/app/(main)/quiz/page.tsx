@@ -4,8 +4,17 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import type { Mode, Question } from "@/lib/types";
+import MockQuiz from "./MockQuiz";
 
-type Phase = "setup" | "loading" | "answering" | "explaining" | "generating" | "stalled" | "finished";
+type Phase =
+  | "resume-prompt"
+  | "setup"
+  | "loading"
+  | "answering"
+  | "explaining"
+  | "generating"
+  | "stalled"
+  | "finished";
 
 type AnswerRecord = {
   question: Question;
@@ -17,6 +26,34 @@ type AnswerRecord = {
 // リクエスト駆動方式（lib/questionSupply.ts）。却下が続く場合のみ複数回叩く必要があるため、
 // UXの保険として呼び出し回数の上限だけクライアント側にも置く（コストの上限はサーバー側の行数判定）。
 const MAX_NEXT_ATTEMPTS = 15;
+
+// 分野別演習の途中経過をlocalStorageに保存し、リロード/離脱後に再開できるようにする
+const SUBJECT_SESSION_KEY = "quiz_session_subject_v1";
+
+type PersistedSubjectSession = {
+  subject: string;
+  count: number;
+  questions: Question[];
+  records: { questionId: number; selected: number[]; isCorrect: boolean }[];
+  index: number;
+  savedAt: number;
+};
+
+function loadSubjectSession(): PersistedSubjectSession | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(SUBJECT_SESSION_KEY);
+    return raw ? (JSON.parse(raw) as PersistedSubjectSession) : null;
+  } catch {
+    return null;
+  }
+}
+function saveSubjectSession(s: PersistedSubjectSession) {
+  localStorage.setItem(SUBJECT_SESSION_KEY, JSON.stringify(s));
+}
+function clearSubjectSession() {
+  localStorage.removeItem(SUBJECT_SESSION_KEY);
+}
 
 async function requestNextQuestion(
   subject: string,
@@ -32,11 +69,8 @@ async function requestNextQuestion(
   return { question: (d.question as Question | null) ?? null, exhausted: !!d.exhausted };
 }
 
-function QuizInner() {
-  const params = useSearchParams();
-  const mode = (params.get("mode") ?? "subject") as Mode;
-
-  const [phase, setPhase] = useState<Phase>("setup");
+function QuizInner({ mode }: { mode: Mode }) {
+  const [phase, setPhase] = useState<Phase>(mode === "subject" ? "resume-prompt" : "setup");
   const [subjects, setSubjects] = useState<{ subject: string; taxonomy_items: number; kind: string | null }[]>([]);
   const [subject, setSubject] = useState("");
   const [count, setCount] = useState(10);
@@ -45,7 +79,9 @@ function QuizInner() {
   const [selected, setSelected] = useState<number[]>([]);
   const [records, setRecords] = useState<AnswerRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [pendingResume, setPendingResume] = useState<PersistedSubjectSession | null>(null);
   const cancelledRef = useRef(false);
+  const prefetchedForIndexRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (mode === "subject") {
@@ -61,6 +97,45 @@ function QuizInner() {
       cancelledRef.current = true;
     };
   }, []);
+
+  // 分野別モードのみ: 前回途中だったセッションが無いか起動時に確認する
+  useEffect(() => {
+    if (mode !== "subject") return;
+    const persisted = loadSubjectSession();
+    if (persisted && persisted.records.length < persisted.count) {
+      setPendingResume(persisted);
+      setPhase("resume-prompt");
+    } else {
+      setPhase("setup");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
+  function resumeSession() {
+    if (!pendingResume) return;
+    const byId = new Map(pendingResume.questions.map((q) => [q.id, q]));
+    const restoredRecords: AnswerRecord[] = pendingResume.records
+      .map((r) => {
+        const question = byId.get(r.questionId);
+        return question ? { question, selected: r.selected, isCorrect: r.isCorrect } : null;
+      })
+      .filter((r): r is AnswerRecord => r !== null);
+    setSubject(pendingResume.subject);
+    setCount(pendingResume.count);
+    setQuestions(pendingResume.questions);
+    setIndex(pendingResume.index);
+    setRecords(restoredRecords);
+    const answeredCurrent = restoredRecords.length > pendingResume.index;
+    setSelected(answeredCurrent ? restoredRecords[restoredRecords.length - 1].selected : []);
+    setPendingResume(null);
+    setPhase(answeredCurrent ? "explaining" : "answering");
+  }
+
+  function discardSession() {
+    clearSubjectSession();
+    setPendingResume(null);
+    setPhase("setup");
+  }
 
   /**
    * 分野別モード: まだ見ていない問題を1問取得する。既存プールに無ければサーバーが
@@ -87,6 +162,19 @@ function QuizInner() {
     [subject],
   );
 
+  // 現在の問題を解いている/解説を見ている間に、裏で次の1問の用意を進めておく
+  // （既に生成済みならこの呼び出しは即座に既存プールから返るだけ。無ければここで
+  // 生成が始まるので、ユーザーが次へ進む頃には出来上がっている可能性が高くなる）。
+  useEffect(() => {
+    if (mode !== "subject" || !subject) return;
+    if (phase !== "answering" && phase !== "explaining") return;
+    if (records.length >= count) return;
+    if (prefetchedForIndexRef.current === index) return;
+    prefetchedForIndexRef.current = index;
+    const excludeIds = questions.map((qq) => qq.id);
+    requestNextQuestion(subject, excludeIds).catch(() => {});
+  }, [mode, subject, phase, index, questions, count, records.length]);
+
   const start = useCallback(async () => {
     setPhase("loading");
     setError(null);
@@ -99,6 +187,7 @@ function QuizInner() {
         setQuestions([first]);
         setIndex(0);
         setPhase("answering");
+        saveSubjectSession({ subject, count, questions: [first], records: [], index: 0, savedAt: Date.now() });
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         setPhase("setup");
@@ -115,22 +204,18 @@ function QuizInner() {
       return;
     }
     if (!d.questions || d.questions.length === 0) {
-      setError(
-        mode === "review"
-          ? "復習対象の誤答問題がありません。まず演習してみましょう。"
-          : "問題プールが空です。分野別演習で問題を生成してから試してください。",
-      );
+      setError("復習対象の誤答問題がありません。まず演習してみましょう。");
       setPhase("setup");
       return;
     }
     setQuestions(d.questions);
     setIndex(0);
     setPhase("answering");
-  }, [mode, count, waitForNextSubjectQuestion]);
+  }, [mode, subject, count, waitForNextSubjectQuestion]);
 
-  // 分野別以外は即開始できる
+  // 復習モードは即開始できる
   useEffect(() => {
-    if (mode !== "subject" && phase === "setup" && questions.length === 0 && !error) {
+    if (mode === "review" && phase === "setup" && questions.length === 0 && !error) {
       start();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -159,13 +244,25 @@ function QuizInner() {
       setError(d.error);
       return;
     }
-    setRecords((prev) => [...prev, { question: q, selected, isCorrect: d.is_correct }]);
+    const nextRecords = [...records, { question: q, selected, isCorrect: d.is_correct as boolean }];
+    setRecords(nextRecords);
     setPhase("explaining");
+    if (mode === "subject") {
+      saveSubjectSession({
+        subject,
+        count,
+        questions,
+        records: nextRecords.map((r) => ({ questionId: r.question.id, selected: r.selected, isCorrect: r.isCorrect })),
+        index,
+        savedAt: Date.now(),
+      });
+    }
   }
 
   async function next() {
     if (mode === "subject") {
       if (records.length >= count) {
+        clearSubjectSession();
         setPhase("finished");
         return;
       }
@@ -180,10 +277,19 @@ function QuizInner() {
       try {
         const excludeIds = questions.map((qq) => qq.id);
         const nextQ = await waitForNextSubjectQuestion(excludeIds);
-        setQuestions((prev) => [...prev, nextQ]);
+        const nextQuestions = [...questions, nextQ];
+        setQuestions(nextQuestions);
         setIndex(index + 1);
         setSelected([]);
         setPhase("answering");
+        saveSubjectSession({
+          subject,
+          count,
+          questions: nextQuestions,
+          records: records.map((r) => ({ questionId: r.question.id, selected: r.selected, isCorrect: r.isCorrect })),
+          index: index + 1,
+          savedAt: Date.now(),
+        });
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         setPhase("stalled");
@@ -205,13 +311,33 @@ function QuizInner() {
     void next();
   }
 
+  // --- 再開バナー ---
+  if (phase === "resume-prompt" && pendingResume) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-xl font-bold">分野別演習</h1>
+        <div className="rounded-xl bg-amber-50 p-5 shadow">
+          <p className="text-sm text-amber-800">
+            前回途中だった演習があります（{pendingResume.subject}: {pendingResume.records.length} / {pendingResume.count} 問まで解答済み）。続きから再開しますか？
+          </p>
+          <div className="mt-3 flex gap-3">
+            <button onClick={resumeSession} className="rounded bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-700">
+              続きから再開する
+            </button>
+            <button onClick={discardSession} className="rounded border border-slate-300 px-4 py-2 text-sm text-slate-600">
+              新しく始める
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // --- セットアップ画面 ---
   if (phase === "setup") {
     return (
       <div className="space-y-4">
-        <h1 className="text-xl font-bold">
-          {mode === "subject" ? "分野別演習" : mode === "mock" ? "全分野ミニ模試" : "復習モード"}
-        </h1>
+        <h1 className="text-xl font-bold">{mode === "subject" ? "分野別演習" : "復習モード"}</h1>
         {error && <p className="rounded bg-amber-100 p-3 text-sm text-amber-800">{error}</p>}
         {mode === "subject" && (
           <div className="rounded-xl bg-white p-5 shadow">
@@ -303,7 +429,14 @@ function QuizInner() {
           ))}
         </div>
         <div className="flex gap-3">
-          <button onClick={() => { setPhase("setup"); setQuestions([]); setError(null); }} className="rounded bg-indigo-600 px-5 py-2 text-white">
+          <button
+            onClick={() => {
+              setPhase("setup");
+              setQuestions([]);
+              setError(null);
+            }}
+            className="rounded bg-indigo-600 px-5 py-2 text-white"
+          >
             もう一度
           </button>
           <Link href="/stats" className="rounded border border-indigo-600 px-5 py-2 text-indigo-700">
@@ -434,10 +567,17 @@ function QuizInner() {
   );
 }
 
+function QuizRouter() {
+  const params = useSearchParams();
+  const mode = (params.get("mode") ?? "subject") as Mode;
+  if (mode === "mock") return <MockQuiz />;
+  return <QuizInner mode={mode} />;
+}
+
 export default function QuizPage() {
   return (
     <Suspense fallback={<p>読み込み中...</p>}>
-      <QuizInner />
+      <QuizRouter />
     </Suspense>
   );
 }
