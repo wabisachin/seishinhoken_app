@@ -312,15 +312,15 @@ export default function MockQuiz() {
                     {q.citations && q.citations.length > 0 && (
                       <div>
                         <h3 className="mb-1 font-bold text-stone-700">教科書の根拠</h3>
-                        {q.citations.map((c, ci) => (
-                          <blockquote key={ci} className="mb-2 border-l-4 border-indigo-200 pl-3 text-stone-600">
-                            <p className="whitespace-pre-wrap leading-relaxed">{c.excerpt}</p>
-                            <footer className="mt-1 text-xs text-stone-400">
+                        <ul className="space-y-1">
+                          {q.citations.map((c, ci) => (
+                            <li key={ci} className="flex items-baseline gap-2 text-stone-600">
+                              <span className="text-indigo-300">・</span>
                               {c.book} p.{c.page_start}
                               {c.page_end !== c.page_start ? `–${c.page_end}` : ""}
-                            </footer>
-                          </blockquote>
-                        ))}
+                            </li>
+                          ))}
+                        </ul>
                       </div>
                     )}
                   </div>

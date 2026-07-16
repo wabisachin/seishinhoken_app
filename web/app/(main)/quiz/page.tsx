@@ -566,15 +566,15 @@ function QuizInner({ mode }: { mode: Mode }) {
           {q.citations && q.citations.length > 0 && (
             <div className="rounded-2xl bg-white p-5 shadow-warm">
               <h3 className="mb-2 font-bold text-stone-700">教科書の根拠</h3>
-              {q.citations.map((c, i) => (
-                <blockquote key={i} className="mb-3 border-l-4 border-indigo-200 pl-3 text-sm text-stone-600">
-                  <p className="whitespace-pre-wrap leading-relaxed">{c.excerpt}</p>
-                  <footer className="mt-1 text-xs text-stone-400">
+              <ul className="space-y-1">
+                {q.citations.map((c, i) => (
+                  <li key={i} className="flex items-baseline gap-2 text-sm text-stone-600">
+                    <span className="text-indigo-300">・</span>
                     {c.book} p.{c.page_start}
                     {c.page_end !== c.page_start ? `–${c.page_end}` : ""}
-                  </footer>
-                </blockquote>
-              ))}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 
