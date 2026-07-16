@@ -87,6 +87,7 @@ function QuizInner({ mode }: { mode: Mode }) {
   const [generatingAttempt, setGeneratingAttempt] = useState(0);
   const cancelledRef = useRef(false);
   const prefetchedForIndexRef = useRef<number | null>(null);
+  const prefetchPromiseRef = useRef<Promise<{ question: Question | null; exhausted: boolean } | null> | null>(null);
 
   useEffect(() => {
     if (mode === "subject") {
@@ -166,9 +167,10 @@ function QuizInner({ mode }: { mode: Mode }) {
     [subject],
   );
 
-  // 現在の問題を解いている/解説を見ている間に、裏で次の1問の用意を進めておく
-  // （既に生成済みならこの呼び出しは即座に既存プールから返るだけ。無ければここで
-  // 生成が始まるので、ユーザーが次へ進む頃には出来上がっている可能性が高くなる）。
+  // 現在の問題を解いている/解説を見ている間に、裏で次の1問の用意を進めておく。
+  // 結果は prefetchPromiseRef に保持しておき、next() で改めて生成を待たせるのではなく
+  // この呼び出し1回分の結果をそのまま使い回す（そうしないと、次へ進んだ時にもう一度
+  // 独立した生成判定が走り、待っている間にせっかく裏で用意できていたものが無駄になる）。
   useEffect(() => {
     if (mode !== "subject" || !subject) return;
     if (phase !== "answering" && phase !== "explaining") return;
@@ -176,7 +178,7 @@ function QuizInner({ mode }: { mode: Mode }) {
     if (prefetchedForIndexRef.current === index) return;
     prefetchedForIndexRef.current = index;
     const excludeIds = questions.map((qq) => qq.id);
-    requestNextQuestion(subject, excludeIds).catch(() => {});
+    prefetchPromiseRef.current = requestNextQuestion(subject, excludeIds).catch(() => null);
   }, [mode, subject, phase, index, questions, count, records.length]);
 
   const start = useCallback(async () => {
@@ -282,7 +284,10 @@ function QuizInner({ mode }: { mode: Mode }) {
       setGeneratingAttempt(0);
       try {
         const excludeIds = questions.map((qq) => qq.id);
-        const nextQ = await waitForNextSubjectQuestion(excludeIds);
+        const prefetched = prefetchPromiseRef.current;
+        prefetchPromiseRef.current = null;
+        const prefetchedResult = prefetched ? await prefetched : null;
+        const nextQ = prefetchedResult?.question ?? (await waitForNextSubjectQuestion(excludeIds));
         const nextQuestions = [...questions, nextQ];
         setQuestions(nextQuestions);
         setIndex(index + 1);
