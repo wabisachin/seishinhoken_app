@@ -6,7 +6,6 @@ import type { Question } from "@/lib/types";
 import { dedupeCitations } from "@/lib/citations";
 
 const PAGE_SIZE = 3;
-const COUNT = 12;
 const STORAGE_KEY = "quiz_session_mock_v1";
 
 type Answer = { selected: number[]; isCorrect: boolean };
@@ -62,7 +61,7 @@ export default function MockQuiz() {
     clearPersisted();
     setPhase("loading");
     setError(null);
-    const res = await fetch(`/api/quiz?mode=mock&count=${COUNT}`);
+    const res = await fetch(`/api/quiz?mode=mock&perSubject=${PAGE_SIZE}`);
     const d = await res.json();
     if (d.error || !d.questions || d.questions.length === 0) {
       setError(d.error ?? "問題プールが空です。分野別演習で問題を生成してから試してください。");

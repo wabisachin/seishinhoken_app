@@ -20,7 +20,8 @@ const QUESTION_COLS =
 /**
  * 出題セットを返す。
  * mode=subject: 指定科目からランダム
- * mode=mock:    全科目から本番配分（過去問の科目別問題数比）でサンプリング
+ * mode=mock:    プールがある全科目から均等に perSubject 問（既定3問）ずつ、
+ *               共通課程→専門課程の順にまとめてサンプリング
  * mode=review:  最後の解答が誤答だった問題を優先
  */
 export async function GET(req: NextRequest) {
@@ -43,32 +44,35 @@ export async function GET(req: NextRequest) {
     }
 
     if (mode === "mock") {
-      // 本番配分: 過去問の科目別問題数を重みに使う
-      const { data: pastSubjects } = await sb.from("past_questions").select("subject");
-      const weights = new Map<string, number>();
-      for (const row of pastSubjects ?? []) {
-        weights.set(row.subject, (weights.get(row.subject) ?? 0) + 1);
-      }
-      const { data: pool, error } = await sb
-        .from("questions")
-        .select(QUESTION_COLS)
-        .eq("status", "active");
+      const perSubject = Math.min(Math.max(parseInt(params.get("perSubject") ?? "3", 10), 1), 10);
+
+      // 科目ごとの課程区分（共通/専門）。past_questionsに載っている科目名基準。
+      const { data: pastSubjects } = await sb.from("past_questions").select("subject, kind");
+      const kindMap = new Map<string, string | null>();
+      for (const row of pastSubjects ?? []) kindMap.set(row.subject, row.kind);
+
+      const { data: pool, error } = await sb.from("questions").select(QUESTION_COLS).eq("status", "active");
       if (error) throw new Error(error.message);
       const bySubject = new Map<string, Question[]>();
       for (const q of (pool ?? []) as Question[]) {
         if (!bySubject.has(q.subject)) bySubject.set(q.subject, []);
         bySubject.get(q.subject)!.push(q);
       }
-      const totalWeight = [...weights.entries()]
-        .filter(([s]) => bySubject.has(s))
-        .reduce((acc, [, w]) => acc + w, 0);
+
+      // 共通課程→専門課程→その他の順に並べ、各科目のperSubject問がページ単位で
+      // まとまって出るようにする（1ページ=3問なら1ページ=1科目になる）
+      const kindRank = (k: string | null | undefined) => (k === "common" ? 0 : k === "specialized" ? 1 : 2);
+      const subjects = [...bySubject.keys()].sort((a, b) => {
+        const ra = kindRank(kindMap.get(a));
+        const rb = kindRank(kindMap.get(b));
+        return ra !== rb ? ra - rb : a.localeCompare(b, "ja");
+      });
+
       const picked: Question[] = [];
-      for (const [subject, qs] of bySubject) {
-        const w = weights.get(subject) ?? 1;
-        const n = Math.max(1, Math.round((count * w) / Math.max(totalWeight, 1)));
-        picked.push(...shuffle(qs).slice(0, n));
+      for (const subject of subjects) {
+        picked.push(...shuffle(bySubject.get(subject)!).slice(0, perSubject));
       }
-      return NextResponse.json({ questions: shuffle(picked).slice(0, count) });
+      return NextResponse.json({ questions: picked });
     }
 
     if (mode === "review") {
