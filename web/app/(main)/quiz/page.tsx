@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import type { Mode, Question } from "@/lib/types";
+import { dedupeCitations } from "@/lib/citations";
 import MockQuiz from "./MockQuiz";
 
 type Phase =
@@ -582,7 +583,7 @@ function QuizInner({ mode }: { mode: Mode }) {
             <div className="rounded-2xl bg-white p-5 shadow-warm">
               <h3 className="mb-2 font-bold text-stone-700">教科書の根拠</h3>
               <ul className="space-y-1">
-                {q.citations.map((c, i) => (
+                {dedupeCitations(q.citations).map((c, i) => (
                   <li key={i} className="flex items-baseline gap-2 text-sm text-stone-600">
                     <span className="text-indigo-300">・</span>
                     {c.book} p.{c.page_start}

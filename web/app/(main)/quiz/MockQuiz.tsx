@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { Question } from "@/lib/types";
+import { dedupeCitations } from "@/lib/citations";
 
 const PAGE_SIZE = 3;
 const COUNT = 12;
@@ -313,7 +314,7 @@ export default function MockQuiz() {
                       <div>
                         <h3 className="mb-1 font-bold text-stone-700">教科書の根拠</h3>
                         <ul className="space-y-1">
-                          {q.citations.map((c, ci) => (
+                          {dedupeCitations(q.citations).map((c, ci) => (
                             <li key={ci} className="flex items-baseline gap-2 text-stone-600">
                               <span className="text-indigo-300">・</span>
                               {c.book} p.{c.page_start}
