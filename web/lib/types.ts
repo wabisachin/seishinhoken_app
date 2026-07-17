@@ -37,6 +37,8 @@ export const MODEL_PRESETS: { provider: LlmSettings["provider"]; model: string; 
   { provider: "anthropic", model: "claude-sonnet-4-6", label: "Claude Sonnet 4.6（バランス）" },
   { provider: "anthropic", model: "claude-haiku-4-5", label: "Claude Haiku 4.5（低コスト）" },
   { provider: "openai", model: "gpt-5.6-luna", label: "GPT-5.6 Luna（推奨・現行より低コスト）" },
+  { provider: "openai", model: "gpt-5.4-nano", label: "GPT-5.4 nano（スピード最優先）" },
+  { provider: "openai", model: "gpt-4.1-nano", label: "GPT-4.1 nano（低レイテンシ）" },
   { provider: "openai", model: "gpt-4o", label: "GPT-4o" },
   { provider: "openai", model: "gpt-4o-mini", label: "GPT-4o mini" },
   { provider: "google", model: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
