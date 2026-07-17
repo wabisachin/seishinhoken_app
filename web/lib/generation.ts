@@ -177,6 +177,42 @@ function pickFormat(weights: { format: QFormat; weight: number }[]): QFormat {
   return "desc";
 }
 
+/**
+ * 正答数(1つ/2つ)も出題形式と同じ問題を抱えていた ―― 過去問全体では約24%が
+ * 五肢択二（correct 2つ）なのに、明示的に指示しないとLLMはほぼ常に1つに
+ * してしまう。科目によって割合の差も大きい（0%〜67%）ため、出題形式と
+ * 同じくベイズ平滑化した科目ごとの実績比率で1問ごとに確定的に抽選する。
+ */
+async function computeAnswerCountWeights(subject: string): Promise<{ count: 1 | 2; weight: number }[]> {
+  const { data } = await supabase().from("past_questions").select("subject, correct");
+  const rows = (data ?? []).filter((r) => Array.isArray(r.correct) && r.correct.length > 0);
+  const globalCounts: Record<1 | 2, number> = { 1: 0, 2: 0 };
+  const subjectCounts: Record<1 | 2, number> = { 1: 0, 2: 0 };
+  for (const r of rows) {
+    const n = (r.correct as number[]).length === 2 ? 2 : 1;
+    globalCounts[n]++;
+    if (r.subject === subject) subjectCounts[n]++;
+  }
+  const globalTotal = Math.max(1, globalCounts[1] + globalCounts[2]);
+  const subjectTotal = subjectCounts[1] + subjectCounts[2];
+  const K = 8;
+  return ([1, 2] as const).map((count) => {
+    const globalP = globalCounts[count] / globalTotal;
+    const weight = (subjectCounts[count] + globalP * K) / (subjectTotal + K);
+    return { count, weight };
+  });
+}
+
+function pickAnswerCount(weights: { count: 1 | 2; weight: number }[]): 1 | 2 {
+  const r = Math.random();
+  let acc = 0;
+  for (const { count, weight } of weights) {
+    acc += weight;
+    if (r < acc) return count;
+  }
+  return 1;
+}
+
 const FORMAT_INSTRUCTION: Record<QFormat, string> = {
   desc: "知識説明形式で作成すること。対象の事象・概念・制度・理論等について、正しい/誤った説明を選ばせる（case_textはnullでよい）。",
   case: "事例形式で作成すること。「A精神保健福祉士」「Aさん」のように匿名の専門職またはクライエントを主人公にした短い場面を"
@@ -254,10 +290,12 @@ export async function generateOneQuestion(subject: string): Promise<GenerateResu
   const { main, neighbor } = await retrieveForItem(item, llm);
   if (main.length === 0) throw new Error("チャンク検索結果が空です（埋め込み投入済みか確認）");
 
-  // 3. 出題形式を科目ごとの実績比率から抽選（知識説明/事例/用語選択）
+  // 3. 出題形式・正答数を科目ごとの実績比率から抽選（知識説明/事例/用語選択、五肢択一/択二）
   //    ＋few-shot（同科目の実際の過去問）＋この項目で既出の問題・根拠抜粋（重複回避用）
   const formatWeights = await computeFormatWeights(subject);
   const format = pickFormat(formatWeights);
+  const answerCountWeights = await computeAnswerCountWeights(subject);
+  const answerCount = pickAnswerCount(answerCountWeights);
   const fewShot = await fewShotExamples(subject, format);
   const { stems: pastStems, excerpts: pastExcerpts } = await existingCoverage(item.id);
 
@@ -267,7 +305,9 @@ export async function generateOneQuestion(subject: string): Promise<GenerateResu
   const staticPrefix = `あなたは精神保健福祉士国家試験の作問委員です。教科書の記述のみを根拠に、本番と同水準の問題を1問作成してください。
 
 # 作問ルール
-- 問題形式: 五肢択一（correct 1つ）または五肢択二（correct 2つ、問題文に「2つ選びなさい」と明記）。事例問題にしてもよい
+- 問題形式は五肢択一（correct 1つ）と五肢択二（correct 2つ、問題文に「2つ選びなさい」と明記）の
+  2種類があるが、今回どちらにするかは下の「今回作成する問題の正答数」で指定するので必ずそれに従うこと
+  （指定を無視して常に1つにすると、実際の過去問の約24%を占める択二形式を再現できない）
 - 正答は根拠テキストの記述から明確に導けること。根拠テキストに無い事実を使わない
 - 誤答選択肢の作り方（最重要）:
   - 明らかに的外れな選択肢は禁止。受験者が迷う「近いが違う」ものにする
@@ -300,6 +340,13 @@ ${chunkBlock(neighbor)}`;
 
   const variableSuffix = `# 今回作成する問題の出題形式
 ${FORMAT_INSTRUCTION[format]}
+
+# 今回作成する問題の正答数
+${
+  answerCount === 2
+    ? "五肢択二で作成すること。question_typeは\"multi\"、correctは2つ、問題文の末尾に「2つ選びなさい」と明記する。"
+    : "五肢択一で作成すること。question_typeは\"single\"、correctは1つ。"
+}
 
 # 実際の過去問の文体・形式（これに厳密に合わせる）
 ${fewShot}
@@ -338,6 +385,9 @@ ${pastExcerpts.length ? pastExcerpts.map((e, i) => `${i + 1}. ${e}...`).join("\n
     if (q.correct.length < 1 || q.correct.length > 2) formatProblems.push("正答数が1〜2でない");
     if (q.correct.some((c) => c < 1 || c > 5)) formatProblems.push("正答番号が1〜5の範囲外");
     if ((q.question_type === "single") !== (q.correct.length === 1)) formatProblems.push("question_typeと正答数が不一致");
+    if (q.correct.length > 0 && q.correct.length <= 2 && q.correct.length !== answerCount) {
+      formatProblems.push(`指定した正答数(${answerCount}つ)に従っていない`);
+    }
     if (formatProblems.length > 0) {
       lastProblems = formatProblems;
       continue;
