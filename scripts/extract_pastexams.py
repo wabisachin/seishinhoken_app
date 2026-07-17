@@ -21,8 +21,6 @@ SRC = ROOT / "exam_pdf" / "past_exam"
 OUT = ROOT / "data"
 OUT.mkdir(parents=True, exist_ok=True)
 
-ANSWER_KEY_PDF = next(SRC.glob("*合格基準及び正答*.pdf"))
-
 
 def pdf_text(path: Path) -> str:
     doc = fitz.open(path)
@@ -31,9 +29,9 @@ def pdf_text(path: Path) -> str:
     return unicodedata.normalize("NFKC", text)
 
 
-def parse_answer_key() -> dict:
+def parse_answer_key(answer_key_pdf: Path) -> dict:
     """正答表 → {科目名: {問題番号: [正答...]}} 行ベースの状態機械でパース。"""
-    lines = [ln.strip() for ln in pdf_text(ANSWER_KEY_PDF).splitlines()]
+    lines = [ln.strip() for ln in pdf_text(answer_key_pdf).splitlines()]
     answers = {}
     subject = None
     nums, vals = [], []
@@ -125,27 +123,42 @@ def parse_question_pdf(path: Path) -> tuple:
 
 
 def main() -> None:
-    answers = parse_answer_key()
-    print(f"answer key subjects ({len(answers)}):", list(answers.keys()))
+    # 年度ごとのサブフォルダ単位で処理し、そのフォルダ内の正答表と突き合わせる
+    round_dirs = sorted(p for p in SRC.iterdir() if p.is_dir())
+    if not round_dirs:
+        round_dirs = [SRC]
 
     result = []
-    for pdf in sorted(SRC.glob("*.pdf")):
-        if "正答" in pdf.name:
-            continue
-        kind = "specialized" if pdf.name.startswith("se_") else "common"
-        subject, questions = parse_question_pdf(pdf)
-        answer_map = answers.get(subject, {})
-        matched = 0
-        for q in questions:
-            q["subject"] = subject
-            q["kind"] = kind
-            q["source_file"] = pdf.name
-            q["correct"] = answer_map.get(q["number"], [])
-            if q["correct"]:
-                matched += 1
-        result.extend(questions)
-        warn = sum(1 for q in questions if q.get("parse_warning"))
-        print(f"{pdf.name}: subject={subject} questions={len(questions)} answered={matched} warnings={warn}")
+    for round_dir in round_dirs:
+        key_pdfs = sorted(round_dir.glob("*合格基準及び正答*.pdf"))
+        answers = parse_answer_key(key_pdfs[0]) if key_pdfs else {}
+        print(f"\n[{round_dir.name}] answer key subjects ({len(answers)}): {'あり' if key_pdfs else 'なし(正答は空になります)'}")
+
+        seen_names = set()
+        for pdf in sorted(round_dir.glob("*.pdf")):
+            if "正答" in pdf.name:
+                continue
+            # 同名だが "(1)" などが付いた重複ダウンロードをスキップ
+            base_name = re.sub(r"\s*\(\d+\)(?=\.pdf$)", "", pdf.name)
+            if base_name in seen_names:
+                print(f"{pdf.name}: 重複ファイルとしてスキップ")
+                continue
+            seen_names.add(base_name)
+
+            kind = "specialized" if pdf.name.startswith("se_") else "common"
+            subject, questions = parse_question_pdf(pdf)
+            answer_map = answers.get(subject, {})
+            matched = 0
+            for q in questions:
+                q["subject"] = subject
+                q["kind"] = kind
+                q["source_file"] = f"{round_dir.name}/{pdf.name}"
+                q["correct"] = answer_map.get(q["number"], [])
+                if q["correct"]:
+                    matched += 1
+            result.extend(questions)
+            warn = sum(1 for q in questions if q.get("parse_warning"))
+            print(f"{pdf.name}: subject={subject} questions={len(questions)} answered={matched} warnings={warn}")
 
     out_path = OUT / "past_questions.json"
     out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

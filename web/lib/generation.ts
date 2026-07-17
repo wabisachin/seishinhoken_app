@@ -101,13 +101,17 @@ async function existingCoverage(taxonomyId: number, limit = 15) {
 }
 
 /**
- * 過去問(18科目・132問)を分析した結果の出題形式3分類。
- * - desc: 事象・概念・制度・理論等の正誤を問う知識説明形式（約65%、これまでLLMが
- *   ほぼ常に選んでいた形式）
+ * 過去問(18科目・2回分264問)を分析した結果の出題形式3分類。
+ * - desc: 事象・概念・制度・理論等の正誤を問う知識説明形式（全体では約68%、これまで
+ *   LLMがほぼ常に選んでいた形式）
  * - case: 「A精神保健福祉士」「Aさん」等の匿名の専門職・クライエントを主人公にした
- *   短い場面を設定し、その場面における適切な認識・対応等を問う事例形式（約33%を
- *   占めるにもかかわらず、放置するとLLMがほぼ生成しない形式）
- * - term: 「正しい用語はどれか」を明示的に問う用語選択形式（約2%、稀）
+ *   短い場面を設定し、その場面における適切な認識・対応等を問う事例形式（全体では
+ *   約31%を占めるにもかかわらず、放置するとLLMがほぼ生成しない形式）
+ * - term: 「正しい用語はどれか」を明示的に問う用語選択形式（全体では1%未満、稀）
+ *
+ * 科目によってcaseの出やすさに大きな差がある（例: 「ソーシャルワークの理論と方法」は
+ * 過去2回で18問中11問が事例形式=61%な一方、「社会福祉の原理と政策」は18問中0問=0%）
+ * ため、固定比率ではなく科目ごとの実績から動的に算出する（下記computeFormatWeights）。
  */
 type QFormat = "case" | "term" | "desc";
 
@@ -118,17 +122,37 @@ function classifyFormat(stem: string, caseText: string | null): QFormat {
   return "desc";
 }
 
-// 実際の過去問の分布に合わせた出題形式の抽選比率
-const FORMAT_WEIGHTS: { format: QFormat; weight: number }[] = [
-  { format: "desc", weight: 0.65 },
-  { format: "case", weight: 0.33 },
-  { format: "term", weight: 0.02 },
-];
+const QFORMATS: QFormat[] = ["desc", "case", "term"];
 
-function pickFormat(): QFormat {
+/**
+ * 科目ごとの出題形式の実績比率を算出する。その科目のサンプルが少ない/偏っている
+ * 場合に引きずられすぎないよう、全科目平均を弱い事前分布として厚み K ぶんだけ
+ * ベイズ的に混ぜる（科目のサンプルが多いほど、その科目自身の実績に近づく）。
+ */
+async function computeFormatWeights(subject: string): Promise<{ format: QFormat; weight: number }[]> {
+  const { data } = await supabase().from("past_questions").select("subject, stem, case_text");
+  const rows = data ?? [];
+  const globalCounts: Record<QFormat, number> = { desc: 0, case: 0, term: 0 };
+  const subjectCounts: Record<QFormat, number> = { desc: 0, case: 0, term: 0 };
+  for (const r of rows) {
+    const fmt = classifyFormat(r.stem as string, r.case_text as string | null);
+    globalCounts[fmt]++;
+    if (r.subject === subject) subjectCounts[fmt]++;
+  }
+  const globalTotal = Math.max(1, QFORMATS.reduce((sum, f) => sum + globalCounts[f], 0));
+  const subjectTotal = QFORMATS.reduce((sum, f) => sum + subjectCounts[f], 0);
+  const K = 8; // 平滑化の強さ（このぶんだけ全体平均寄りに引っ張る）
+  return QFORMATS.map((format) => {
+    const globalP = globalCounts[format] / globalTotal;
+    const weight = (subjectCounts[format] + globalP * K) / (subjectTotal + K);
+    return { format, weight };
+  });
+}
+
+function pickFormat(weights: { format: QFormat; weight: number }[]): QFormat {
   const r = Math.random();
   let acc = 0;
-  for (const { format, weight } of FORMAT_WEIGHTS) {
+  for (const { format, weight } of weights) {
     acc += weight;
     if (r < acc) return format;
   }
@@ -145,12 +169,16 @@ const FORMAT_INSTRUCTION: Record<QFormat, string> = {
 };
 
 async function fewShotExamples(subject: string, targetFormat: QFormat, n = 3): Promise<string> {
+  // correctが空の過去問（正答表が無い年度分）は「正答: 」が空欄になり手本として
+  // 不完全なので、few-shotの材料からは除外する
+  const hasAnswer = (q: { correct: unknown }) => Array.isArray(q.correct) && q.correct.length > 0;
+
   const { data: subjectRows } = await supabase()
     .from("past_questions")
     .select("stem, case_text, options, correct")
     .eq("subject", subject)
-    .limit(20);
-  const pool = (subjectRows ?? []).map((q) => ({
+    .limit(40);
+  const pool = (subjectRows ?? []).filter(hasAnswer).map((q) => ({
     ...q,
     format: classifyFormat(q.stem as string, q.case_text as string | null),
   }));
@@ -160,8 +188,9 @@ async function fewShotExamples(subject: string, targetFormat: QFormat, n = 3): P
   if (targetMatches.length === 0 && targetFormat !== "desc") {
     // この科目の少ないサンプルにたまたま無い場合、他科目から同じ形式の実例を借りて
     // 「書き方」だけ真似させる（内容は本問の根拠テキストの範囲で作らせるので問題ない）
-    const { data: globalRows } = await supabase().from("past_questions").select("stem, case_text, options, correct").limit(200);
+    const { data: globalRows } = await supabase().from("past_questions").select("stem, case_text, options, correct").limit(400);
     targetMatches = (globalRows ?? [])
+      .filter(hasAnswer)
       .map((q) => ({ ...q, format: classifyFormat(q.stem as string, q.case_text as string | null) }))
       .filter((q) => q.format === targetFormat)
       .sort(() => Math.random() - 0.5);
@@ -207,9 +236,10 @@ export async function generateOneQuestion(subject: string): Promise<GenerateResu
   const { main, neighbor } = await retrieveForItem(item, llm);
   if (main.length === 0) throw new Error("チャンク検索結果が空です（埋め込み投入済みか確認）");
 
-  // 3. 出題形式を抽選（知識説明/事例/用語選択）＋few-shot（同科目の実際の過去問）
-  //    ＋この項目で既出の問題・根拠抜粋（重複回避用）
-  const format = pickFormat();
+  // 3. 出題形式を科目ごとの実績比率から抽選（知識説明/事例/用語選択）
+  //    ＋few-shot（同科目の実際の過去問）＋この項目で既出の問題・根拠抜粋（重複回避用）
+  const formatWeights = await computeFormatWeights(subject);
+  const format = pickFormat(formatWeights);
   const fewShot = await fewShotExamples(subject, format);
   const { stems: pastStems, excerpts: pastExcerpts } = await existingCoverage(item.id);
 
@@ -232,11 +262,13 @@ export async function generateOneQuestion(subject: string): Promise<GenerateResu
 - key_points はこの問題の周辺で覚えるべきことの整理（混同しやすい概念の対比など）
 - citation_chunk_ids には実際に根拠として使ったチャンクのid（整数）を入れる
 
-# 出題形式（過去問18科目分の分析に基づく3分類。毎回どれか1つを指定するので、
-# 指定された形式で作成すること。放っておくと知識説明形式ばかりに偏ってしまうため）
-- 知識説明形式（約65%）: ${FORMAT_INSTRUCTION.desc}
-- 事例形式（約33%）: ${FORMAT_INSTRUCTION.case}
-- 用語選択形式（約2%）: ${FORMAT_INSTRUCTION.term}
+# 出題形式（過去問18科目・2回分の分析に基づく3分類。全体の目安比率は知識説明68%・
+# 事例31%・用語選択1%だが、科目によって事例形式の出やすさにはかなり差がある。
+# 今回どの形式で作るかは下の「今回作成する問題の出題形式」で指定するので、必ずそれに従うこと。
+# 指定を無視すると知識説明形式ばかりに偏ってしまうため）
+- 知識説明形式: ${FORMAT_INSTRUCTION.desc}
+- 事例形式: ${FORMAT_INSTRUCTION.case}
+- 用語選択形式: ${FORMAT_INSTRUCTION.term}
 
 # 出題対象
 科目: ${subject}
