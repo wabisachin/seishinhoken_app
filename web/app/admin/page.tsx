@@ -7,6 +7,7 @@ type Preset = { provider: LlmSettings["provider"]; model: string; label: string 
 type ErrorLog = { id: number; source: string; message: string; detail: string | null; created_at: string };
 type UsageTotals = { inputTokens: number; cachedInputTokens: number; outputTokens: number; costUsd: number };
 type UsageByModel = UsageTotals & { provider: string; model: string };
+type SubjectStock = { subject: string; unserved: number; active: number; total: number };
 
 export default function AdminPage() {
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -23,6 +24,11 @@ export default function AdminPage() {
   const [usageTotals, setUsageTotals] = useState<UsageTotals | null>(null);
   const [usageByModel, setUsageByModel] = useState<UsageByModel[]>([]);
   const [usageCallCount, setUsageCallCount] = useState(0);
+  const [stock, setStock] = useState<SubjectStock[]>([]);
+  const [stockCheckedAt, setStockCheckedAt] = useState<string | null>(null);
+  const [stockLoading, setStockLoading] = useState(false);
+  const [resetUnservedConfirm, setResetUnservedConfirm] = useState(false);
+  const [resetUnservedMsg, setResetUnservedMsg] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/admin/status")
@@ -35,8 +41,20 @@ export default function AdminPage() {
       loadSettings();
       loadErrors();
       loadUsage();
+      loadStock();
     }
   }, [authed]);
+
+  function loadStock() {
+    setStockLoading(true);
+    fetch("/api/admin/stock")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.stock) setStock(d.stock);
+        if (d.checkedAt) setStockCheckedAt(d.checkedAt);
+      })
+      .finally(() => setStockLoading(false));
+  }
 
   function loadErrors() {
     fetch("/api/admin/errors")
@@ -121,6 +139,17 @@ export default function AdminPage() {
     setResetConfirm(false);
   }
 
+  async function runResetUnserved() {
+    setResetUnservedMsg("実行中...");
+    const res = await fetch("/api/admin/reset-unserved", { method: "POST" });
+    const d = await res.json();
+    setResetUnservedMsg(
+      res.ok ? `未出題の問題を${d.deleted}件削除しました。裏側で再生成を始めています。` : `エラー: ${d.error}`,
+    );
+    setResetUnservedConfirm(false);
+    loadStock();
+  }
+
   if (authed === null) return <div className="p-6 text-sm text-slate-500">確認中...</div>;
 
   if (!authed) {
@@ -155,6 +184,50 @@ export default function AdminPage() {
           ログアウト
         </button>
       </div>
+
+      <section className="rounded-xl bg-white p-5 shadow">
+        <div className="flex items-center justify-between">
+          <h2 className="font-bold text-slate-700">科目ごとの未出題ストック</h2>
+          <button onClick={loadStock} className="text-xs text-slate-400 hover:underline">
+            {stockLoading ? "更新中..." : "更新"}
+          </button>
+        </div>
+        <p className="mt-1 text-sm text-slate-500">
+          「本人がまだ一度も出題されていないactive問題」の件数（このページを開いた時点のスナップショット）。
+          目標は科目ごとに常時5問。裏側のCron・出題フックが自動で埋めるので、通常は操作不要です。
+        </p>
+        {stockCheckedAt && (
+          <p className="mt-1 text-xs text-slate-400">{new Date(stockCheckedAt).toLocaleString("ja-JP")} 時点</p>
+        )}
+        {stock.length === 0 ? (
+          <p className="mt-3 text-sm text-slate-400">まだデータがありません。</p>
+        ) : (
+          <div className="mt-3 max-h-80 overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-slate-100 text-left">
+                <tr>
+                  <th className="px-3 py-1.5">科目</th>
+                  <th className="px-3 py-1.5 text-right">未出題</th>
+                  <th className="px-3 py-1.5 text-right">アクティブ計</th>
+                  <th className="px-3 py-1.5 text-right">総試行(却下含)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stock.map((s) => (
+                  <tr key={s.subject} className="border-t border-slate-100">
+                    <td className="px-3 py-1.5">{s.subject}</td>
+                    <td className={`px-3 py-1.5 text-right font-medium ${s.unserved < 5 ? "text-amber-600" : "text-slate-700"}`}>
+                      {s.unserved}
+                    </td>
+                    <td className="px-3 py-1.5 text-right">{s.active}</td>
+                    <td className="px-3 py-1.5 text-right">{s.total}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <section className="rounded-xl bg-white p-5 shadow">
         <h2 className="font-bold text-slate-700">問題生成に使うLLM</h2>
@@ -271,6 +344,42 @@ export default function AdminPage() {
           </div>
         )}
         {resetMsg && <p className="mt-3 text-sm text-slate-700">{resetMsg}</p>}
+      </section>
+
+      <section className="rounded-xl bg-white p-5 shadow">
+        <h2 className="font-bold text-red-700">未出題問題のリセット（モデル/プロンプト変更時）</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          モデルや生成プロンプト・方針を変えた後、それ以前の設定で作られた「まだ誰にも出題していない」問題は
+          今の基準に合わなくなるため削除します。すでに出題済みの問題・解答履歴・成績は一切削除しません。
+          削除後は裏側で自動的にゼロから再生成・再ストックが始まります（この操作の完了を待つ必要はありません）。
+        </p>
+        {!resetUnservedConfirm ? (
+          <button
+            onClick={() => setResetUnservedConfirm(true)}
+            className="mt-3 min-h-12 rounded-lg bg-red-600 px-4 py-3 text-sm font-medium text-white hover:bg-red-700"
+          >
+            未出題の問題をリセットする
+          </button>
+        ) : (
+          <div className="mt-3 space-y-2">
+            <p className="text-sm font-medium text-red-700">全科目の未出題問題を削除し、再生成を開始します。よろしいですか？</p>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                onClick={runResetUnserved}
+                className="min-h-12 rounded-lg bg-red-600 px-4 py-3 text-sm font-medium text-white hover:bg-red-700"
+              >
+                削除して再生成
+              </button>
+              <button
+                onClick={() => setResetUnservedConfirm(false)}
+                className="min-h-12 rounded-lg border border-slate-300 px-4 py-3 text-sm text-slate-600"
+              >
+                キャンセル
+              </button>
+            </div>
+          </div>
+        )}
+        {resetUnservedMsg && <p className="mt-3 text-sm text-slate-700">{resetUnservedMsg}</p>}
       </section>
 
       <section className="rounded-xl bg-white p-5 shadow">

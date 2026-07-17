@@ -1,9 +1,10 @@
 import { supabase } from "./supabase";
 import { generateOneQuestion } from "./generation";
 import { logError } from "./errorLog";
+import { listSubjects } from "./subjects";
 import type { Question } from "./types";
 
-// 累積アクティブ数がこれ未満の間は毎回新規生成する
+// 累積アクティブ数がこれ未満の間は、ストック補充のたびに必ず新規生成する
 const FULL_GENERATION_UNTIL = 50;
 // これに達したら新規生成を止め、以降はプールからの再出題のみにする
 const SUBJECT_TARGET = 200;
@@ -94,33 +95,126 @@ async function countUnservedActive(subject: string): Promise<number> {
   return ids.filter((id) => !attemptedIds.has(id)).length;
 }
 
+// 同じ科目に対するtopUpSubjectの多重起動を防ぐガード（同一インスタンス内のみ有効な
+// ベストエフォート。分野別演習は出題のたびにこの関数を呼ぶため、セッション開始直後の
+// 先読みチェーンが同じ科目に対して短時間に何度も呼ぶバーストを潰す目的。インスタンスを
+// またぐ多重実行が万一起きても、下の科目上限（SUBJECT_TARGET/HARD_CAP_TOTAL）は
+// DBの行数を直接数えて判定するため、コストが際限なく増えることはない）
+const topUpInFlight = new Set<string>();
+
 /**
- * 指定科目の「未出題ストック」がSTOCK_TARGET未満なら、既存の科目上限（SUBJECT_TARGET /
- * HARD_CAP_TOTAL）を守りながら、そこに達するまで（最大TOPUP_BATCH_CAP件まで）生成する。
- * 生成失敗（却下含む）が続く場合は無限ループにならないよう都度打ち切る。
+ * 指定科目の「未出題ストック」がSTOCK_TARGET未満なら生成して埋める。ただし
+ * 「50問に達するまでは必ず新規、200問に向けて徐々に新規率を下げる」という
+ * コスト上限のポリシー自体は変わらない。生成のタイミングが同期（即時）から
+ * 非同期（このストック補充）に移っただけで、成熟した科目（50〜200問）では
+ * 確率で「今回は生成しない」が選ばれることがあり、その場合はストックが
+ * 5に届いていなくても無理に埋めようとせず、そのまま打ち切る
+ * （却下含め生成に失敗し続ける場合も同様に打ち切る。TOPUP_BATCH_CAPが上限）。
  *
- * 1日1回のCron（`/api/cron/topup`）と、回答送信直後のバックグラウンドフック
- * （`/api/attempts`、Next.jsの`after()`で非ブロッキング実行）の両方から呼ばれる。
+ * 1日1回のCron（`/api/cron/topup`）と、出題直後のバックグラウンドフック
+ * （`/api/quiz/next`、Next.jsの`after()`で非ブロッキング実行）の両方から呼ばれる。
  * どちらもこの関数自体が「呼ばれた分しか動かない」ため、常駐ループにはならない。
  */
 export async function topUpSubject(subject: string): Promise<{ generated: number; unservedBefore: number }> {
-  const unservedBefore = await countUnservedActive(subject);
-  let unserved = unservedBefore;
-  let generated = 0;
-  while (unserved < STOCK_TARGET && generated < TOPUP_BATCH_CAP) {
-    const totalCount = await countBySubject(subject, ["active", "rejected"]);
-    const activeCount = await countBySubject(subject, ["active"]);
-    if (totalCount >= HARD_CAP_TOTAL || activeCount >= SUBJECT_TARGET) break;
-    try {
-      const result = await generateOneQuestion(subject);
-      generated++;
-      if (result.status === "active") unserved++;
-    } catch (e) {
-      await logError("topup", e, { subject });
-      break;
+  if (topUpInFlight.has(subject)) return { generated: 0, unservedBefore: -1 };
+  topUpInFlight.add(subject);
+  try {
+    const unservedBefore = await countUnservedActive(subject);
+    let unserved = unservedBefore;
+    let generated = 0;
+    while (unserved < STOCK_TARGET && generated < TOPUP_BATCH_CAP) {
+      const totalCount = await countBySubject(subject, ["active", "rejected"]);
+      const activeCount = await countBySubject(subject, ["active"]);
+      if (totalCount >= HARD_CAP_TOTAL || activeCount >= SUBJECT_TARGET) break;
+
+      const newProbability =
+        activeCount < FULL_GENERATION_UNTIL ? 1 : (SUBJECT_TARGET - activeCount) / (SUBJECT_TARGET - FULL_GENERATION_UNTIL);
+      if (Math.random() >= newProbability) break;
+
+      try {
+        const result = await generateOneQuestion(subject);
+        generated++;
+        if (result.status === "active") unserved++;
+      } catch (e) {
+        await logError("topup", e, { subject });
+        break;
+      }
+    }
+    return { generated, unservedBefore };
+  } finally {
+    topUpInFlight.delete(subject);
+  }
+}
+
+// 全科目分をまとめて処理する時（Cron／管理者操作からの再構築）の並列数と時間予算。
+// Vercel関数のタイムアウトに収まるよう、予算を超えたら残りは次回の呼び出しに委ねる
+// （topUpSubject自体が「その時点のストック不足分だけ埋める」冪等な処理なので安全）。
+const TOPUP_ALL_CONCURRENCY = 4;
+const TOPUP_ALL_TIME_BUDGET_MS = 270_000;
+
+export async function topUpAllSubjects(): Promise<{ results: Record<string, number>; remaining: string[] }> {
+  const start = Date.now();
+  const results: Record<string, number> = {};
+  const queue = await listSubjects();
+
+  async function worker() {
+    while (queue.length > 0 && Date.now() - start < TOPUP_ALL_TIME_BUDGET_MS) {
+      const subject = queue.shift();
+      if (!subject) break;
+      try {
+        const { generated } = await topUpSubject(subject);
+        results[subject] = generated;
+      } catch (e) {
+        await logError("topup-all", e, { subject });
+        results[subject] = -1;
+      }
     }
   }
-  return { generated, unservedBefore };
+
+  await Promise.all(Array.from({ length: TOPUP_ALL_CONCURRENCY }, () => worker()));
+  return { results, remaining: queue };
+}
+
+export type SubjectStock = { subject: string; unserved: number; active: number; total: number };
+
+/** 管理者ページ表示用。科目ごとの「未出題ストック」「アクティブ総数」「総試行数(却下含む)」のスナップショット。 */
+export async function getStockSnapshot(): Promise<SubjectStock[]> {
+  const subjects = await listSubjects();
+  return Promise.all(
+    subjects.map(async (subject) => {
+      const [unserved, active, total] = await Promise.all([
+        countUnservedActive(subject),
+        countBySubject(subject, ["active"]),
+        countBySubject(subject, ["active", "rejected"]),
+      ]);
+      return { subject, unserved, active, total };
+    }),
+  );
+}
+
+/**
+ * モデルやプロンプトの変更で、既存の未出題問題（本人に一度も出題されていないもの）が
+ * 現在の生成方針と合わなくなった場合に使う。既に出題済み（attemptsが1件でもある）問題は
+ * 解答履歴・成績に影響するため一切削除しない。削除するのは「まだ誰にも出したことがない」
+ * activeな問題と、却下(rejected)済みの問題（そもそも出したことが無い）だけ。
+ */
+export async function resetUnservedQuestions(): Promise<{ deleted: number }> {
+  const sb = supabase();
+  const { data: attemptedRows, error: attemptedErr } = await sb.from("attempts").select("question_id");
+  if (attemptedErr) throw new Error(attemptedErr.message);
+  const attemptedIds = new Set((attemptedRows ?? []).map((r) => r.question_id as number));
+
+  const { data: candidates, error: candErr } = await sb.from("questions").select("id").in("status", ["active", "rejected"]);
+  if (candErr) throw new Error(candErr.message);
+  const idsToDelete = (candidates ?? []).map((r) => r.id as number).filter((id) => !attemptedIds.has(id));
+
+  const CHUNK = 500;
+  for (let i = 0; i < idsToDelete.length; i += CHUNK) {
+    const chunk = idsToDelete.slice(i, i + CHUNK);
+    const { error } = await sb.from("questions").delete().in("id", chunk);
+    if (error) throw new Error(error.message);
+  }
+  return { deleted: idsToDelete.length };
 }
 
 export type NextQuestionResult = {
@@ -147,14 +241,11 @@ export async function getOrGenerateNext(subject: string, excludeIds: number[]): 
   const totalCount = await countBySubject(subject, ["active", "rejected"]);
   const canGenerate = totalCount < HARD_CAP_TOTAL && activeCount < SUBJECT_TARGET;
 
-  // 50問に達するまでは常に新規、そこから200問に向けて徐々に新規率を下げる
-  const newProbability = !canGenerate
-    ? 0
-    : activeCount < FULL_GENERATION_UNTIL
-      ? 1
-      : (SUBJECT_TARGET - activeCount) / (SUBJECT_TARGET - FULL_GENERATION_UNTIL);
-
-  const shouldGenerate = canGenerate && (!existing || Math.random() < newProbability);
+  // かんばん方式のストック（topUpSubject、cron + /api/quiz/nextの出題直後フック）が
+  // 常時ストックを補充しているため、ここ（ユーザーへの出題そのもの）では既存の未出題
+  // 問題があれば必ずそれを即座に返す。その場ライブ生成（ユーザーを待たせる）は、
+  // 本当にストックが尽きている場合の最終手段としてのみ行う。
+  const shouldGenerate = canGenerate && !existing;
 
   if (!shouldGenerate) {
     if (existing) return { question: existing, exhausted: false };
