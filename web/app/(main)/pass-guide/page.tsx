@@ -141,6 +141,56 @@ export default function PassGuidePage() {
       </section>
 
       <section className="rounded-2xl bg-white p-5 shadow-warm">
+        <h2 className="font-bold text-indigo-700">よくある誤答（ひっかけ）のパターン</h2>
+        <p className="mt-2 text-sm leading-relaxed text-stone-600">
+          過去問110問以上の正答・誤答を照合して分析したところ、誤りの選択肢の作られ方には
+          いくつかの型がありました。読んでいて「なんとなく合ってそう」と感じた選択肢ほど、
+          次のどれかに当てはまっていないか疑ってみてください。
+        </p>
+        <ol className="mt-3 space-y-2 text-sm leading-relaxed text-stone-700">
+          <li>
+            <span className="font-medium text-stone-900">① 類似・隣接概念とのすり替え（最も多い）</span>
+            <br />
+            同じ分野の別の概念・分類・理論の説明を、問われている対象の説明であるかのように混ぜてくる。
+            5つの選択肢すべてが実在する用語で、うち1つだけが本当に問いに合致する、という形が最頻出です。
+          </li>
+          <li>
+            <span className="font-medium text-stone-900">② 人物と業績の取り違え</span>
+            <br />
+            人物名は実在の人物だが、その人が実際に行ったことではなく、別の人物の理論・功績・立場を
+            割り当てている。
+          </li>
+          <li>
+            <span className="font-medium text-stone-900">③ 制度・法律の主体／対象／要件のすり替え</span>
+            <br />
+            「誰が行うか」「対象になるのは誰か」「要件は何か」を、実際とは異なる別のもの
+            （別の職種・別の機関・別の年齢層など）に置き換えている。
+          </li>
+          <li>
+            <span className="font-medium text-stone-900">④ 数値・年号・期間の書き換え</span>
+            <br />
+            正しい記述の中の数字（年齢、年数、期間、比率、順位など）だけを変えている。
+          </li>
+          <li>
+            <span className="font-medium text-stone-900">⑤ 過度な一般化・断定・除外</span>
+            <br />
+            「必ず」「〜できない」「〜のみ」など、実際には例外や幅があることを断定的・排他的に
+            言い切っている。
+          </li>
+          <li>
+            <span className="font-medium text-stone-900">⑥ 事例問題での「一見丁寧だが実践的には不適切」な対応</span>
+            <br />
+            善意や丁寧さは感じられるが、専門職の対応としては時期尚早な解釈の押し付けや、
+            パターナリスティックな判断の先取りなど、実践上は適切でない選択肢。
+          </li>
+        </ol>
+        <p className="mt-3 text-xs text-stone-400">
+          このアプリが生成する問題も、これらの型を組み合わせて誤答を作るようにしていますが、
+          1つの型だけに偏らないよう毎回複数の型を混ぜています。
+        </p>
+      </section>
+
+      <section className="rounded-2xl bg-white p-5 shadow-warm">
         <h2 className="font-bold text-indigo-700">このアプリを使った進め方の目安</h2>
         <ul className="mt-2 space-y-2 text-sm leading-relaxed text-stone-700">
           <li className="flex gap-2">
