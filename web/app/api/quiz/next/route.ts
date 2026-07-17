@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getOrGenerateNext } from "@/lib/questionSupply";
+import { NextRequest, NextResponse, after } from "next/server";
+import { getOrGenerateNext, topUpSubject } from "@/lib/questionSupply";
+import { logError } from "@/lib/errorLog";
 
 export const maxDuration = 60;
 
@@ -14,6 +15,14 @@ export async function POST(req: NextRequest) {
     if (!subject) return NextResponse.json({ error: "subject is required" }, { status: 400 });
     const excludeIds: number[] = Array.isArray(body.excludeIds) ? body.excludeIds : [];
     const result = await getOrGenerateNext(subject, excludeIds);
+
+    // ストックの「消費」は回答送信時ではなく、問題が画面に出される（＝取り出される）
+    // このタイミングで起きたとみなす。after()はレスポンス返却後に実行されるため、
+    // ユーザーの待ち時間には一切影響しない（かんばん方式の補充トリガー）。
+    if (result.question) {
+      after(() => topUpSubject(subject).catch((e) => logError("quiz-next-topup", e, { subject })));
+    }
+
     return NextResponse.json(result);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

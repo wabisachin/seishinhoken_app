@@ -69,6 +69,60 @@ async function fetchQuestionById(id: number): Promise<Question | null> {
   return (data as Question | null) ?? null;
 }
 
+// 科目ごとに常時これだけ「本人がまだ一度も出題されていないactive問題」を確保しておく目標値。
+// ユーザーが解くスピードの方がその場生成より速いため、事前にストックしておくことで
+// リクエスト駆動の生成待ちを実質無くす（出題と生成の非同期化）。
+const STOCK_TARGET = 5;
+// 1回の呼び出し（cronでも回答直後のフックでも）で生成するのは高々この件数まで。
+const TOPUP_BATCH_CAP = 10;
+
+/**
+ * 「本人(profile='self')がまだ一度も出題されていないactive問題」の件数。
+ * activeなquestions行数は出題されても減らない（消費されない）ため、それとは別の指標として
+ * 見る必要がある。これが「今すぐ出せる在庫」の実態に対応する。
+ */
+async function countUnservedActive(subject: string): Promise<number> {
+  const { data: active } = await supabase().from("questions").select("id").eq("subject", subject).eq("status", "active");
+  const ids = (active ?? []).map((r) => r.id as number);
+  if (ids.length === 0) return 0;
+  const { data: attempted } = await supabase()
+    .from("attempts")
+    .select("question_id")
+    .eq("profile", "self")
+    .in("question_id", ids);
+  const attemptedIds = new Set((attempted ?? []).map((r) => r.question_id as number));
+  return ids.filter((id) => !attemptedIds.has(id)).length;
+}
+
+/**
+ * 指定科目の「未出題ストック」がSTOCK_TARGET未満なら、既存の科目上限（SUBJECT_TARGET /
+ * HARD_CAP_TOTAL）を守りながら、そこに達するまで（最大TOPUP_BATCH_CAP件まで）生成する。
+ * 生成失敗（却下含む）が続く場合は無限ループにならないよう都度打ち切る。
+ *
+ * 1日1回のCron（`/api/cron/topup`）と、回答送信直後のバックグラウンドフック
+ * （`/api/attempts`、Next.jsの`after()`で非ブロッキング実行）の両方から呼ばれる。
+ * どちらもこの関数自体が「呼ばれた分しか動かない」ため、常駐ループにはならない。
+ */
+export async function topUpSubject(subject: string): Promise<{ generated: number; unservedBefore: number }> {
+  const unservedBefore = await countUnservedActive(subject);
+  let unserved = unservedBefore;
+  let generated = 0;
+  while (unserved < STOCK_TARGET && generated < TOPUP_BATCH_CAP) {
+    const totalCount = await countBySubject(subject, ["active", "rejected"]);
+    const activeCount = await countBySubject(subject, ["active"]);
+    if (totalCount >= HARD_CAP_TOTAL || activeCount >= SUBJECT_TARGET) break;
+    try {
+      const result = await generateOneQuestion(subject);
+      generated++;
+      if (result.status === "active") unserved++;
+    } catch (e) {
+      await logError("topup", e, { subject });
+      break;
+    }
+  }
+  return { generated, unservedBefore };
+}
+
 export type NextQuestionResult = {
   question: Question | null;
   /** true: 上限に達しており、かつ出せる問題も無い（=これ以上待っても無駄、即エラー表示してよい） */

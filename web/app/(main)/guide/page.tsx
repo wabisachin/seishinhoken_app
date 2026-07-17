@@ -40,8 +40,10 @@ export default function GuidePage() {
       <section className="rounded-2xl bg-white p-5 shadow-warm">
         <h2 className="font-bold text-indigo-700">「問題を準備しています」と出たら</h2>
         <p className="mt-2 text-sm leading-relaxed text-stone-700">
-          このアプリはAIがその場で問題を書き上げているため、新しい問題を用意するのに
-          20〜40秒ほどかかることがあります。「次の問題を生成中です」と表示されたら、
+          このアプリはAIが問題を書き上げていますが、各科目とも「まだ出したことのない問題」を
+          常に何問か裏側でストックしておく仕組みになっているため、通常はこの画面を見ることは
+          ほとんどありません。ストックがたまたま切れているタイミングなど、まれにその場で
+          新しい問題を用意することがあり、その場合だけ20〜40秒ほどかかります。表示されたら
           少しだけそのままお待ちください。自動的に問題が表示されます。
         </p>
       </section>
