@@ -235,6 +235,25 @@ export async function topUpAllSubjects(): Promise<{ results: Record<string, numb
   return { results, remaining: queue };
 }
 
+/**
+ * 新しいデプロイのコールドスタート直後（`web/instrumentation.ts`）に、全科目のストック補充を
+ * 1回だけ走らせるための「claim」。`app_settings.last_topup_deployment_id`と比較し、
+ * 今回のdeploymentIdとまだ一致していなければ、それを新しい値に書き換えた上でtrueを返す
+ * （= このインスタンスが実行担当）。Vercelの同時コールドスタートで複数インスタンスが
+ * 同時にこの関数を呼んでも、DBの行を条件付きで更新するのは1インスタンスだけになる
+ * （後勝ちで多少の重複が起き得るが、実害はtopUpSubjectの冪等性・上限で吸収される）。
+ */
+export async function claimDeploymentTopUp(deploymentId: string): Promise<boolean> {
+  const { data, error } = await supabase()
+    .from("app_settings")
+    .update({ last_topup_deployment_id: deploymentId })
+    .eq("id", 1)
+    .or(`last_topup_deployment_id.is.null,last_topup_deployment_id.neq.${deploymentId}`)
+    .select("id");
+  if (error) throw new Error(error.message);
+  return (data ?? []).length > 0;
+}
+
 export type SubjectStock = { subject: string; unserved: number; active: number; total: number };
 
 /** 管理者ページ表示用。科目ごとの「未出題ストック」「アクティブ総数」「総試行数(却下含む)」のスナップショット。 */
