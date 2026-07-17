@@ -255,7 +255,9 @@ export default function MockQuiz() {
   }
 
   const pageQuestions = questions.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
-  const canProceed = pageQuestions.length > 0 && pageQuestions.every((q) => (draft[q.id]?.length ?? 0) > 0);
+  const requiredSelect = (q: Question) => (q.question_type === "multi" ? 2 : 1);
+  const canProceed =
+    pageQuestions.length > 0 && pageQuestions.every((q) => (draft[q.id]?.length ?? 0) === requiredSelect(q));
   const isLastPage = page + 1 >= subjectOrder.length;
 
   async function submitPage() {
@@ -622,6 +624,11 @@ export default function MockQuiz() {
                 );
               })}
             </div>
+            {sel.length > 0 && sel.length < requiredSelect(q) && (
+              <p className="mt-2 text-sm font-medium text-amber-700">
+                この問題は{requiredSelect(q)}つ選んでください（あと{requiredSelect(q) - sel.length}つ）
+              </p>
+            )}
           </div>
         );
       })}

@@ -583,9 +583,14 @@ function QuizInner({ mode }: { mode: Mode }) {
             className="fixed inset-x-0 bottom-0 z-10 border-t border-stone-200 bg-white/95 p-4 backdrop-blur sm:static sm:mt-4 sm:border-0 sm:bg-transparent sm:p-0"
             style={{ paddingBottom: "max(env(safe-area-inset-bottom), 1rem)" }}
           >
+            {selected.length > 0 && selected.length < maxSelect && (
+              <p className="mb-2 text-sm font-medium text-amber-700">
+                この問題は{maxSelect}つ選んでください（あと{maxSelect - selected.length}つ）
+              </p>
+            )}
             <button
               onClick={submit}
-              disabled={selected.length === 0}
+              disabled={selected.length !== maxSelect}
               className="min-h-12 w-full rounded-xl bg-indigo-600 px-6 py-3 font-medium text-white hover:bg-indigo-700 transition-colors disabled:opacity-40 sm:w-auto"
             >
               解答する
