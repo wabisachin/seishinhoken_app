@@ -114,15 +114,24 @@ const topUpInFlight = new Set<string>();
  * 1日1回のCron（`/api/cron/topup`）と、出題直後のバックグラウンドフック
  * （`/api/quiz/next`、Next.jsの`after()`で非ブロッキング実行）の両方から呼ばれる。
  * どちらもこの関数自体が「呼ばれた分しか動かない」ため、常駐ループにはならない。
+ *
+ * maxGenerateで1回の呼び出しで生成する上限を制限できる（既定はTOPUP_BATCH_CAP）。
+ * `/api/quiz/next`の出題直後フックは、そのルート自体のmaxDurationを超えて強制終了
+ * されるとtopUpInFlightの解除(finally)が走らずその科目が永久にスキップされ続けるため、
+ * 1回あたり最大1問だけに絞って必ずmaxDuration内に収まるようにしている。5問まで
+ * 埋めきる本体の仕事は1日1回のCron（maxDuration=300秒）に任せる。
  */
-export async function topUpSubject(subject: string): Promise<{ generated: number; unservedBefore: number }> {
+export async function topUpSubject(
+  subject: string,
+  maxGenerate: number = TOPUP_BATCH_CAP,
+): Promise<{ generated: number; unservedBefore: number }> {
   if (topUpInFlight.has(subject)) return { generated: 0, unservedBefore: -1 };
   topUpInFlight.add(subject);
   try {
     const unservedBefore = await countUnservedActive(subject);
     let unserved = unservedBefore;
     let generated = 0;
-    while (unserved < STOCK_TARGET && generated < TOPUP_BATCH_CAP) {
+    while (unserved < STOCK_TARGET && generated < maxGenerate) {
       const totalCount = await countBySubject(subject, ["active", "rejected"]);
       const activeCount = await countBySubject(subject, ["active"]);
       if (totalCount >= HARD_CAP_TOTAL || activeCount >= SUBJECT_TARGET) break;
