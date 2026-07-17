@@ -19,6 +19,7 @@ export default function AdminPage() {
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [resetConfirm, setResetConfirm] = useState(false);
   const [resetMsg, setResetMsg] = useState<string | null>(null);
+  const [resetPasswordInput, setResetPasswordInput] = useState("");
   const [errors, setErrors] = useState<ErrorLog[]>([]);
   const [expandedError, setExpandedError] = useState<number | null>(null);
   const [usageTotals, setUsageTotals] = useState<UsageTotals | null>(null);
@@ -29,6 +30,7 @@ export default function AdminPage() {
   const [stockLoading, setStockLoading] = useState(false);
   const [resetUnservedConfirm, setResetUnservedConfirm] = useState(false);
   const [resetUnservedMsg, setResetUnservedMsg] = useState<string | null>(null);
+  const [resetUnservedPasswordInput, setResetUnservedPasswordInput] = useState("");
 
   useEffect(() => {
     fetch("/api/admin/status")
@@ -133,21 +135,35 @@ export default function AdminPage() {
 
   async function runReset() {
     setResetMsg("実行中...");
-    const res = await fetch("/api/admin/reset", { method: "POST" });
+    const res = await fetch("/api/admin/reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: resetPasswordInput }),
+    });
     const d = await res.json();
     setResetMsg(res.ok ? "リセットしました（生成問題・解答履歴を削除）" : `エラー: ${d.error}`);
-    setResetConfirm(false);
+    if (res.ok) {
+      setResetConfirm(false);
+      setResetPasswordInput("");
+    }
   }
 
   async function runResetUnserved() {
     setResetUnservedMsg("実行中...");
-    const res = await fetch("/api/admin/reset-unserved", { method: "POST" });
+    const res = await fetch("/api/admin/reset-unserved", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: resetUnservedPasswordInput }),
+    });
     const d = await res.json();
     setResetUnservedMsg(
       res.ok ? `未出題の問題を${d.deleted}件削除しました。裏側で再生成を始めています。` : `エラー: ${d.error}`,
     );
-    setResetUnservedConfirm(false);
-    loadStock();
+    if (res.ok) {
+      setResetUnservedConfirm(false);
+      setResetUnservedPasswordInput("");
+      loadStock();
+    }
   }
 
   if (authed === null) return <div className="p-6 text-sm text-slate-500">確認中...</div>;
@@ -193,8 +209,9 @@ export default function AdminPage() {
           </button>
         </div>
         <p className="mt-1 text-sm text-slate-500">
-          「本人がまだ一度も出題されていないactive問題」の件数（このページを開いた時点のスナップショット）。
-          目標は科目ごとに常時5問。裏側のCron・出題フックが自動で埋めるので、通常は操作不要です。
+          「未出題」は本人がまだ一度も解いていない問題の数（目標は常時5問。裏側のCron・出題フックが
+          自動で埋めるので通常は操作不要）。「アクティブ計」はこれまで生成された問題の累計で、
+          一度出題しても減らないため、練習が進んだ科目ほど未出題より大きくなります。
         </p>
         {stockCheckedAt && (
           <p className="mt-1 text-xs text-slate-400">{new Date(stockCheckedAt).toLocaleString("ja-JP")} 時点</p>
@@ -207,8 +224,8 @@ export default function AdminPage() {
               <thead className="sticky top-0 bg-slate-100 text-left">
                 <tr>
                   <th className="px-3 py-1.5">科目</th>
-                  <th className="px-3 py-1.5 text-right">未出題</th>
-                  <th className="px-3 py-1.5 text-right">アクティブ計</th>
+                  <th className="px-3 py-1.5 text-right">未出題（本人未回答）</th>
+                  <th className="px-3 py-1.5 text-right">アクティブ計（累計）</th>
                   <th className="px-3 py-1.5 text-right">総試行(却下含)</th>
                 </tr>
               </thead>
@@ -326,16 +343,28 @@ export default function AdminPage() {
           </button>
         ) : (
           <div className="mt-3 space-y-2">
-            <p className="text-sm font-medium text-red-700">本当に削除しますか？元に戻せません。</p>
+            <p className="text-sm font-medium text-red-700">本当に削除しますか？元に戻せません。確認のためパスワードを入力してください。</p>
+            <input
+              type="password"
+              value={resetPasswordInput}
+              onChange={(e) => setResetPasswordInput(e.target.value)}
+              placeholder="パスワード"
+              autoFocus
+              className="min-h-12 w-full rounded-lg border border-slate-300 p-3"
+            />
             <div className="flex flex-col gap-2 sm:flex-row">
               <button
                 onClick={runReset}
-                className="min-h-12 rounded-lg bg-red-600 px-4 py-3 text-sm font-medium text-white hover:bg-red-700"
+                disabled={!resetPasswordInput}
+                className="min-h-12 rounded-lg bg-red-600 px-4 py-3 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 削除を実行
               </button>
               <button
-                onClick={() => setResetConfirm(false)}
+                onClick={() => {
+                  setResetConfirm(false);
+                  setResetPasswordInput("");
+                }}
                 className="min-h-12 rounded-lg border border-slate-300 px-4 py-3 text-sm text-slate-600"
               >
                 キャンセル
@@ -362,16 +391,30 @@ export default function AdminPage() {
           </button>
         ) : (
           <div className="mt-3 space-y-2">
-            <p className="text-sm font-medium text-red-700">全科目の未出題問題を削除し、再生成を開始します。よろしいですか？</p>
+            <p className="text-sm font-medium text-red-700">
+              全科目の未出題問題を削除し、再生成を開始します。確認のためパスワードを入力してください。
+            </p>
+            <input
+              type="password"
+              value={resetUnservedPasswordInput}
+              onChange={(e) => setResetUnservedPasswordInput(e.target.value)}
+              placeholder="パスワード"
+              autoFocus
+              className="min-h-12 w-full rounded-lg border border-slate-300 p-3"
+            />
             <div className="flex flex-col gap-2 sm:flex-row">
               <button
                 onClick={runResetUnserved}
-                className="min-h-12 rounded-lg bg-red-600 px-4 py-3 text-sm font-medium text-white hover:bg-red-700"
+                disabled={!resetUnservedPasswordInput}
+                className="min-h-12 rounded-lg bg-red-600 px-4 py-3 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 削除して再生成
               </button>
               <button
-                onClick={() => setResetUnservedConfirm(false)}
+                onClick={() => {
+                  setResetUnservedConfirm(false);
+                  setResetUnservedPasswordInput("");
+                }}
                 className="min-h-12 rounded-lg border border-slate-300 px-4 py-3 text-sm text-slate-600"
               >
                 キャンセル

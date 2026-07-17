@@ -8,12 +8,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "パスワードが違います" }, { status: 401 });
     }
     const res = NextResponse.json({ ok: true });
+    // 30日固定だと「なぜか毎回パスワードを求められない」と感じるほど長期間ログイン状態が
+    // 残ってしまうため、管理者セッションは1時間で切れるようにする。
     res.cookies.set(ADMIN_COOKIE, issueToken(), {
       httpOnly: true,
       secure: true,
       sameSite: "lax",
       path: "/",
-      maxAge: 60 * 60 * 24 * 30,
+      maxAge: 60 * 60,
     });
     return res;
   } catch (e) {
