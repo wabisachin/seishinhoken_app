@@ -100,8 +100,13 @@ function QuizInner({ mode }: { mode: Mode }) {
   const [generatingAttempt, setGeneratingAttempt] = useState(0);
   const [expandedCitation, setExpandedCitation] = useState<number | null>(null);
   const cancelledRef = useRef(false);
-  const prefetchedForIndexRef = useRef<number | null>(null);
-  const prefetchPromiseRef = useRef<Promise<{ question: Question | null; exhausted: boolean } | null> | null>(null);
+  // 分野別モード: セッション開始直後から、残り問題を裏で連続的に先読みしておく
+  // （1問先読みだけだと、読むのが速いユーザーには追いつけないため、模試の
+  // バックグラウンドランナーと同じ考え方でセッション分すべて先読みを進める）。
+  // 各問題は前の問題のIDをexcludeIdsに積み上げる必要があり並列化できないため、
+  // 1問ずつ順番に取得しながらMapに結果を積んでいく。
+  const prefetchQueueRef = useRef<Map<number, Promise<{ question: Question | null; exhausted: boolean }>>>(new Map());
+  const prefetchChainStartedRef = useRef(false);
 
   useEffect(() => {
     if (mode === "subject") {
@@ -150,6 +155,13 @@ function QuizInner({ mode }: { mode: Mode }) {
     setSelected(answeredCurrent ? restoredRecords[restoredRecords.length - 1].selected : []);
     setPendingResume(null);
     setPhase(answeredCurrent ? "explaining" : "answering");
+    prefetchChainStartedRef.current = false;
+    prefetchQueueRef.current.clear();
+    void runSubjectPrefetchChain(
+      pendingResume.questions.map((q) => q.id),
+      pendingResume.count,
+      pendingResume.questions.length,
+    );
   }
 
   function discardSession() {
@@ -182,19 +194,42 @@ function QuizInner({ mode }: { mode: Mode }) {
     [subject],
   );
 
-  // 現在の問題を解いている/解説を見ている間に、裏で次の1問の用意を進めておく。
-  // 結果は prefetchPromiseRef に保持しておき、next() で改めて生成を待たせるのではなく
-  // この呼び出し1回分の結果をそのまま使い回す（そうしないと、次へ進んだ時にもう一度
-  // 独立した生成判定が走り、待っている間にせっかく裏で用意できていたものが無駄になる）。
-  useEffect(() => {
-    if (mode !== "subject" || !subject) return;
-    if (phase !== "answering" && phase !== "explaining") return;
-    if (records.length >= count) return;
-    if (prefetchedForIndexRef.current === index) return;
-    prefetchedForIndexRef.current = index;
-    const excludeIds = questions.map((qq) => qq.id);
-    prefetchPromiseRef.current = requestNextQuestion(subject, excludeIds).catch(() => null);
-  }, [mode, subject, phase, index, questions, count, records.length]);
+  // 却下等で取得できなかった場合だけ、フォアグラウンドと同じ回数だけ静かにリトライする
+  // （generating表示やgeneratingAttemptは更新しない。ユーザーはまだこのスロットを待っていないため）
+  const silentlyFetchOne = useCallback(
+    async (excludeIds: number[]) => {
+      for (let attempt = 0; attempt < MAX_NEXT_ATTEMPTS && !cancelledRef.current; attempt++) {
+        const result = await requestNextQuestion(subject, excludeIds).catch(() => ({ question: null, exhausted: false }));
+        if (result.question || result.exhausted) return result;
+      }
+      return { question: null, exhausted: false };
+    },
+    [subject],
+  );
+
+  // セッション開始直後から、残りの問題を裏で連続的に先読みする。1問ずつ順番に
+  // （前の問題のIDをexcludeIdsに積み上げる必要があるため並列化できない）取得し、
+  // 結果をスロット番号(index)ごとにMapへ積んでおく。next()はここから取り出すだけで済むので、
+  // ユーザーが読んでいる間に複数問先まで用意が進む（模試のバックグラウンドランナーと同じ考え方）。
+  const runSubjectPrefetchChain = useCallback(
+    async (seedExcludeIds: number[], sessionCount: number, startIndex: number) => {
+      if (prefetchChainStartedRef.current) return;
+      prefetchChainStartedRef.current = true;
+      let excludeIds = [...seedExcludeIds];
+      for (let idx = startIndex; idx < sessionCount; idx++) {
+        if (cancelledRef.current) break;
+        const p = silentlyFetchOne(excludeIds);
+        prefetchQueueRef.current.set(idx, p);
+        const result = await p;
+        if (result.question) {
+          excludeIds = [...excludeIds, result.question.id];
+        } else {
+          break; // これ以上の先読みは無駄と判断して打ち切る。フォアグラウンド側が改めて試みる
+        }
+      }
+    },
+    [silentlyFetchOne],
+  );
 
   const start = useCallback(async () => {
     setPhase("loading");
@@ -204,12 +239,15 @@ function QuizInner({ mode }: { mode: Mode }) {
 
     if (mode === "subject") {
       setGeneratingAttempt(0);
+      prefetchChainStartedRef.current = false;
+      prefetchQueueRef.current.clear();
       try {
         const first = await waitForNextSubjectQuestion([]);
         setQuestions([first]);
         setIndex(0);
         setPhase("answering");
         saveSubjectSession({ subject, count, questions: [first], records: [], index: 0, savedAt: Date.now() });
+        void runSubjectPrefetchChain([first.id], count, 1);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         setPhase("setup");
@@ -300,9 +338,10 @@ function QuizInner({ mode }: { mode: Mode }) {
       setGeneratingAttempt(0);
       try {
         const excludeIds = questions.map((qq) => qq.id);
-        const prefetched = prefetchPromiseRef.current;
-        prefetchPromiseRef.current = null;
-        const prefetchedResult = prefetched ? await prefetched : null;
+        const nextIndex = index + 1;
+        const queued = prefetchQueueRef.current.get(nextIndex);
+        prefetchQueueRef.current.delete(nextIndex);
+        const prefetchedResult = queued ? await queued : null;
         const nextQ = prefetchedResult?.question ?? (await waitForNextSubjectQuestion(excludeIds));
         const nextQuestions = [...questions, nextQ];
         setQuestions(nextQuestions);
