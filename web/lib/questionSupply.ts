@@ -174,10 +174,44 @@ export async function topUpSubject(
 const TOPUP_ALL_CONCURRENCY = 4;
 const TOPUP_ALL_TIME_BUDGET_MS = 270_000;
 
+/**
+ * 「不足分(weight)が大きいほど選ばれやすい」重み付き抽選で、復元無しの処理順を作る。
+ * 単純な降順ソートにしない理由: 却下が続いて時間を食う科目が万一あっても、それが
+ * 毎回必ず先頭に来て他の科目の順番を恒常的に奪う、という固定化を避けるため。
+ * 確率的に不足が大きい科目を優先しつつ、ある程度のばらつきを残す。
+ */
+function weightedShuffle<T>(items: { key: T; weight: number }[]): T[] {
+  const pool = items.filter((i) => i.weight > 0).map((i) => ({ ...i }));
+  const order: T[] = [];
+  while (pool.length > 0) {
+    const total = pool.reduce((sum, i) => sum + i.weight, 0);
+    let r = Math.random() * total;
+    let idx = pool.length - 1;
+    for (let i = 0; i < pool.length; i++) {
+      r -= pool[i].weight;
+      if (r <= 0) {
+        idx = i;
+        break;
+      }
+    }
+    order.push(pool.splice(idx, 1)[0].key);
+  }
+  return order;
+}
+
+/**
+ * 処理順を「未出題ストックの不足分（STOCK_TARGET - unserved）」に比例した重み付き抽選で
+ * 決める。すでに目標を満たしている科目は対象から除外する（時間予算を無駄にしない）。
+ * こうしないと、たまたま先頭付近にある・不足していない科目にも均等に時間を使ってしまい、
+ * 本当に不足している科目が時間切れで後回しにされ続けるということが起こり得る。
+ */
 export async function topUpAllSubjects(): Promise<{ results: Record<string, number>; remaining: string[] }> {
   const start = Date.now();
   const results: Record<string, number> = {};
-  const queue = await listSubjects();
+  const snapshot = await getStockSnapshot();
+  const queue = weightedShuffle(
+    snapshot.map((s) => ({ key: s.subject, weight: Math.max(0, STOCK_TARGET - s.unserved) })),
+  );
 
   async function worker() {
     while (queue.length > 0 && Date.now() - start < TOPUP_ALL_TIME_BUDGET_MS) {
