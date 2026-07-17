@@ -33,6 +33,10 @@ const MAX_NEXT_ATTEMPTS = 15;
 // リクエストで生成が延々と連発されてしまうため、UI側でも明示的に絞っておく。
 const MAX_SESSION_COUNT = 5;
 
+// 復習モードは新規生成を一切行わない（既存問題の読み出しのみ）ため、
+// 分野別演習のコスト上限用カウント(count状態)とは無関係に、独自の出題数を使う。
+const REVIEW_COUNT = 10;
+
 // 分野別演習の途中経過をlocalStorageに保存し、リロード/離脱後に再開できるようにする
 const SUBJECT_SESSION_KEY = "quiz_session_subject_v1";
 
@@ -208,7 +212,7 @@ function QuizInner({ mode }: { mode: Mode }) {
       return;
     }
 
-    const qs = new URLSearchParams({ mode, count: String(count) });
+    const qs = new URLSearchParams({ mode, count: String(mode === "review" ? REVIEW_COUNT : count) });
     const res = await fetch(`/api/quiz?${qs}`);
     const d = await res.json();
     if (d.error) {
@@ -464,9 +468,16 @@ function QuizInner({ mode }: { mode: Mode }) {
         <div className="flex gap-3">
           <button
             onClick={() => {
-              setPhase("setup");
               setQuestions([]);
               setError(null);
+              if (mode === "review") {
+                // 復習モードは科目選択が無く即開始のため、setup画面任せにすると
+                // 「setupに戻ったら自動開始する」effectがmode不変では再発火せず、
+                // 読み込み中のまま止まってしまう。ここで直接再開始する
+                void start();
+              } else {
+                setPhase("setup");
+              }
             }}
             className="min-h-12 rounded-xl bg-indigo-600 px-5 py-3 font-medium text-white transition-colors hover:bg-indigo-700"
           >

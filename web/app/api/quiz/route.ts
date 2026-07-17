@@ -60,21 +60,37 @@ export async function GET(req: NextRequest) {
         if (!latest.has(a.question_id)) latest.set(a.question_id, a.is_correct);
         if (!a.is_correct) wrongCount.set(a.question_id, (wrongCount.get(a.question_id) ?? 0) + 1);
       }
-      const targetIds = [...latest.entries()]
-        .filter(([, ok]) => !ok)
-        .map(([id]) => id)
-        .sort((a, b) => (wrongCount.get(b) ?? 0) - (wrongCount.get(a) ?? 0))
-        .slice(0, count);
-      if (targetIds.length === 0) return NextResponse.json({ questions: [] });
+      const wrongIds = [...latest.entries()].filter(([, ok]) => !ok).map(([id]) => id);
+      if (wrongIds.length === 0) return NextResponse.json({ questions: [] });
+
+      // 科目は問わず全間違い問題からランダムに選ぶ。ただし固定の上位N件を毎回
+      // 出すのではなく、間違えた回数が多い問題ほど選ばれやすい重み付き抽選にする
+      // （そうしないと「もう一度」しても常に同じ問題・同じ並びになってしまう）
+      const remaining = wrongIds.map((id) => ({ id, weight: wrongCount.get(id) ?? 1 }));
+      const targetIds: number[] = [];
+      const n = Math.min(count, remaining.length);
+      for (let i = 0; i < n; i++) {
+        const total = remaining.reduce((sum, p) => sum + p.weight, 0);
+        let r = Math.random() * total;
+        let idx = remaining.length - 1;
+        for (let j = 0; j < remaining.length; j++) {
+          r -= remaining[j].weight;
+          if (r <= 0) {
+            idx = j;
+            break;
+          }
+        }
+        targetIds.push(remaining[idx].id);
+        remaining.splice(idx, 1);
+      }
+
       const { data, error: qError } = await sb
         .from("questions")
         .select(QUESTION_COLS)
         .in("id", targetIds)
         .eq("status", "active");
       if (qError) throw new Error(qError.message);
-      const order = new Map(targetIds.map((id, i) => [id, i]));
-      const sorted = (data as Question[]).sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
-      return NextResponse.json({ questions: sorted });
+      return NextResponse.json({ questions: shuffle(data as Question[]) });
     }
 
     return NextResponse.json({ error: `unknown mode: ${mode}` }, { status: 400 });
