@@ -34,8 +34,13 @@ export async function GET() {
 
     const now = new Date();
     const thisMonth = now.toISOString().slice(0, 7);
-    const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const lastMonth = lastMonthDate.toISOString().slice(0, 7);
+    // 文字列のまま年月を1つ戻す（Dateで月初日を作ってtoISOStringすると、JSTなど
+    // UTCより進んだタイムゾーンでは月初がUTC上で前月にずれ、1ヶ月余計に戻ってしまう）
+    const [thisYear, thisMonthNum] = thisMonth.split("-").map(Number);
+    const lastMonth =
+      thisMonthNum === 1
+        ? `${thisYear - 1}-12`
+        : `${thisYear}-${String(thisMonthNum - 1).padStart(2, "0")}`;
 
     // 月ごと・科目ごとの内訳（当月データ・科目別推移テーブルの両方の元になる）
     const bySubjectMonthMap = new Map<string, Bucket>(); // key: `${month}|${subject}`
@@ -97,6 +102,7 @@ export async function GET() {
       thisMonth,
       thisMonthAttempts: thisMonthTotal.attempts,
       thisMonthAccuracy,
+      lastMonth,
       lastMonthAttempts: lastMonthTotal.attempts,
       lastMonthAccuracy,
       deltaVsLastMonth: lastMonthTotal.attempts > 0 ? Math.round((thisMonthAccuracy - lastMonthAccuracy) * 10) / 10 : null,

@@ -7,6 +7,7 @@ type Summary = {
   thisMonth: string;
   thisMonthAttempts: number;
   thisMonthAccuracy: number;
+  lastMonth: string;
   lastMonthAttempts: number;
   lastMonthAccuracy: number;
   deltaVsLastMonth: number | null;
@@ -87,7 +88,7 @@ export default function StatsPage() {
       <h1 className="text-xl font-bold">成績</h1>
 
       <section className="rounded-2xl bg-white p-5 shadow-warm">
-        <p className="text-sm text-stone-500">{formatMonth(summary.thisMonth)}の成績（今の実力）</p>
+        <p className="text-sm text-stone-500">{formatMonth(summary.thisMonth)}の成績</p>
         <div className="mt-1 flex flex-wrap items-baseline gap-3">
           <p className="text-4xl font-bold text-indigo-700">{summary.thisMonthAccuracy}%</p>
           {summary.deltaVsLastMonth !== null && (
@@ -102,8 +103,10 @@ export default function StatsPage() {
           )}
         </div>
         <p className="mt-1 text-sm text-stone-500">
-          今月 {summary.thisMonthAttempts}問解答
-          {summary.lastMonthAttempts > 0 && <> ／ 先月 {summary.lastMonthAttempts}問・{summary.lastMonthAccuracy}%</>}
+          {formatMonth(summary.thisMonth)} {summary.thisMonthAttempts}問解答
+          {summary.lastMonthAttempts > 0 && (
+            <> ／ {formatMonth(summary.lastMonth)} {summary.lastMonthAttempts}問・{summary.lastMonthAccuracy}%</>
+          )}
         </p>
       </section>
 
