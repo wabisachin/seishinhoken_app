@@ -20,6 +20,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             <Link href="/quiz" className="transition-colors hover:text-white">演習</Link>
             <Link href="/full-mock" className="transition-colors hover:text-white">本番模試</Link>
             <Link href="/stats" className="transition-colors hover:text-white">成績</Link>
+            <Link href="/pass-guide" className="transition-colors hover:text-white">合格ガイド</Link>
             <Link href="/guide" className="transition-colors hover:text-white">使い方</Link>
           </nav>
         </div>
