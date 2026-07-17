@@ -78,6 +78,8 @@ function chunkBlock(chunks: RetrievedChunk[]): string {
  * 出題対象のタクソノミー項目を選ぶ。既存問題（active/rejected問わず）が
  * 最も少ない項目群からランダムに選ぶことで、200問に達するまでの間、
  * 特定の項目に偏らず出題基準全体をまんべんなくカバーする。
+ * （最小件数以外を選ぶ余地を残すと、同じ項目の焼き直しが増えるリスクがあるため
+ * 厳密な最小値限定にしている）
  */
 async function pickTaxonomyItem(subject: string): Promise<TaxonomyItem> {
   const sb = supabase();
