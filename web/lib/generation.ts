@@ -31,7 +31,12 @@ const questionSchema = z.object({
   question_type: z.enum(["single", "multi"]).describe("正答が1つならsingle、2つならmulti"),
   stem: z.string().describe("問題文。本番の国家試験の文体（〜として、適切なものを1つ選びなさい 等）"),
   case_text: z.string().nullable().describe("事例問題の場合の事例文。通常問題ならnull"),
-  options: z.array(z.string()).describe("選択肢5つ"),
+  options: z
+    .array(z.string())
+    .describe(
+      "選択肢5つ。番号や記号は絶対に付けないこと（例:「1 ○○」「1. ○○」ではなく「○○」のみ）。" +
+        "表示側で1〜5の番号を別途自動で付けるため、文字列側に番号を含めると番号が二重に表示される",
+    ),
   explanations: z
     .array(z.string())
     .describe(
@@ -49,6 +54,19 @@ const verifySchema = z.object({
   ok: z.boolean().describe("すべての検証項目を満たすならtrue"),
   problems: z.array(z.string()).describe("問題点のリスト。okならば空配列"),
 });
+
+/**
+ * LLMが指示に反して選択肢文字列の先頭に自分で番号を付けてしまうことがあり
+ * （表示側でも1〜5の番号を付けるため「1 1 ○○」のように二重表示になる）、
+ * その対策として自分の番号と一致する先頭の番号表記だけを取り除く。
+ * 無関係な数字（例:「3年後に」）まで誤って削らないよう、その選択肢自身の
+ * 番号と一致する場合だけ対象にする。
+ */
+function stripLeadingOptionNumber(text: string, index1based: number): string {
+  const re = new RegExp(`^\\s*${index1based}\\s*[.．、,)\\]]?\\s*`, "u");
+  const stripped = text.replace(re, "").trim();
+  return stripped || text.trim();
+}
 
 function chunkBlock(chunks: RetrievedChunk[]): string {
   return chunks
@@ -311,6 +329,7 @@ ${pastExcerpts.length ? pastExcerpts.map((e, i) => `${i + 1}. ${e}...`).join("\n
       ],
     });
     await logUsage({ source: "generate", subject, provider: llm.provider, model: modelName, usage: generateUsage });
+    q.options = q.options.map((o, i) => stripLeadingOptionNumber(o, i + 1));
 
     // 形式チェック
     const formatProblems: string[] = [];
