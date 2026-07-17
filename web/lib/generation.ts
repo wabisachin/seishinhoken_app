@@ -394,6 +394,7 @@ ${pastExcerpts.length ? pastExcerpts.map((e, i) => `${i + 1}. ${e}...`).join("\n
   const modelName = llm.model;
 
   let lastProblems: string[] = [];
+  let lastQ: z.infer<typeof questionSchema> | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     const retryNote = lastProblems.length
       ? `\n\n# 前回生成の問題点（必ず修正すること）\n- ${lastProblems.join("\n- ")}`
@@ -414,6 +415,7 @@ ${pastExcerpts.length ? pastExcerpts.map((e, i) => `${i + 1}. ${e}...`).join("\n
     });
     await logUsage({ source: "generate", subject, provider: llm.provider, model: modelName, usage: generateUsage });
     q.options = q.options.map((o, i) => stripLeadingOptionNumber(o, i + 1));
+    lastQ = q;
 
     // 形式チェック
     const formatProblems: string[] = [];
@@ -520,6 +522,29 @@ ${optionsList}
       topic,
       problems: verdict.ok ? undefined : verdict.problems,
     };
+  }
+
+  // ここに来るのは、2回とも形式チェック（formatProblems）で弾かれた場合のみ
+  // （検証(verify)まで進んだ場合は、良し悪しに関わらず必ず上のループ内でinsertされて
+  // returnする）。この経路でDBに何も書かずに終わると、HARD_CAP_TOTAL/SUBJECT_TARGETの
+  // 安全弁（DBの行数を直接数える方式）がこの失敗を一切観測できず、こちら側の形式
+  // チェックに万一バグがあった場合に「却下され続けるが上限判定は動かない」という
+  // 致命的な抜け道になる。そのため、たとえ形式が崩れていても却下として必ず1行残す。
+  if (lastQ) {
+    await sb.from("questions").insert({
+      subject,
+      taxonomy_id: item.id,
+      question_type: lastQ.question_type,
+      stem: lastQ.stem,
+      case_text: lastQ.case_text,
+      options: lastQ.options,
+      correct: lastQ.correct,
+      explanations: lastQ.explanations,
+      key_points: lastQ.key_points,
+      citations: null,
+      status: "rejected",
+      model: modelName,
+    });
   }
 
   return { questionId: null, status: "rejected", subject, topic, problems: lastProblems };

@@ -115,23 +115,26 @@ const topUpInFlight = new Set<string>();
  * （`/api/quiz/next`、Next.jsの`after()`で非ブロッキング実行）の両方から呼ばれる。
  * どちらもこの関数自体が「呼ばれた分しか動かない」ため、常駐ループにはならない。
  *
- * maxGenerateで1回の呼び出しで生成する上限を制限できる（既定はTOPUP_BATCH_CAP）。
- * `/api/quiz/next`の出題直後フックは、そのルート自体のmaxDurationを超えて強制終了
- * されるとtopUpInFlightの解除(finally)が走らずその科目が永久にスキップされ続けるため、
- * 1回あたり最大1問だけに絞って必ずmaxDuration内に収まるようにしている。5問まで
- * 埋めきる本体の仕事は1日1回のCron（maxDuration=300秒）に任せる。
+ * timeBudgetMsで経過時間による打ち切りを指定できる（既定は無制限＝呼び出し元の
+ * 外側にあるループ・maxDurationに委ねる）。回数（maxGenerate）ではなく時間で
+ * 打ち切るのは、却下が続いても「1回も生成できないまま終わる」ことを避け、時間の
+ * 許す限り5問到達を狙うため。ホストするルートのmaxDurationより確実に短い値を
+ * 渡すこと（そうしないとVercelに強制終了され、topUpInFlightの解除(finally)が
+ * 走らずその科目が以後スキップされ続けるバグになる。実際にこれで起きた）。
  */
 export async function topUpSubject(
   subject: string,
-  maxGenerate: number = TOPUP_BATCH_CAP,
+  opts: { maxGenerate?: number; timeBudgetMs?: number } = {},
 ): Promise<{ generated: number; unservedBefore: number }> {
+  const { maxGenerate = TOPUP_BATCH_CAP, timeBudgetMs = Infinity } = opts;
   if (topUpInFlight.has(subject)) return { generated: 0, unservedBefore: -1 };
   topUpInFlight.add(subject);
+  const start = Date.now();
   try {
     const unservedBefore = await countUnservedActive(subject);
     let unserved = unservedBefore;
     let generated = 0;
-    while (unserved < STOCK_TARGET && generated < maxGenerate) {
+    while (unserved < STOCK_TARGET && generated < maxGenerate && Date.now() - start < timeBudgetMs) {
       const totalCount = await countBySubject(subject, ["active", "rejected"]);
       const activeCount = await countBySubject(subject, ["active"]);
       if (totalCount >= HARD_CAP_TOTAL || activeCount >= SUBJECT_TARGET) break;
@@ -143,7 +146,17 @@ export async function topUpSubject(
       try {
         const result = await generateOneQuestion(subject);
         generated++;
-        if (result.status === "active") unserved++;
+        if (result.status === "active") {
+          unserved++;
+        } else {
+          // 却下の実際の理由（構造チェック不備か、内容の自己検証NGか）を残しておく。
+          // これが無いと「却下が続く」ことしか分からず、原因究明ができないため。
+          await logError("generation-rejected", new Error("生成した問題が却下されました"), {
+            subject,
+            topic: result.topic,
+            problems: result.problems,
+          });
+        }
       } catch (e) {
         await logError("topup", e, { subject });
         break;
@@ -171,7 +184,11 @@ export async function topUpAllSubjects(): Promise<{ results: Record<string, numb
       const subject = queue.shift();
       if (!subject) break;
       try {
-        const { generated } = await topUpSubject(subject);
+        // 1科目の却下連発で全体予算を大幅に超過しないよう、残り時間だけを渡す
+        // （渡さないと、1科目の内部リトライが長引いた場合にCron自体がVercelの
+        // maxDurationで強制終了されるリスクがある）。
+        const remainingMs = TOPUP_ALL_TIME_BUDGET_MS - (Date.now() - start);
+        const { generated } = await topUpSubject(subject, { timeBudgetMs: remainingMs });
         results[subject] = generated;
       } catch (e) {
         await logError("topup-all", e, { subject });
