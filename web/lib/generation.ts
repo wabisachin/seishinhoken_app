@@ -100,16 +100,78 @@ async function existingCoverage(taxonomyId: number, limit = 15) {
   return { stems, excerpts: [...excerpts] };
 }
 
-async function fewShotExamples(subject: string, n = 3): Promise<string> {
-  const { data } = await supabase()
+/**
+ * 過去問(18科目・132問)を分析した結果の出題形式3分類。
+ * - desc: 事象・概念・制度・理論等の正誤を問う知識説明形式（約65%、これまでLLMが
+ *   ほぼ常に選んでいた形式）
+ * - case: 「A精神保健福祉士」「Aさん」等の匿名の専門職・クライエントを主人公にした
+ *   短い場面を設定し、その場面における適切な認識・対応等を問う事例形式（約33%を
+ *   占めるにもかかわらず、放置するとLLMがほぼ生成しない形式）
+ * - term: 「正しい用語はどれか」を明示的に問う用語選択形式（約2%、稀）
+ */
+type QFormat = "case" | "term" | "desc";
+
+function classifyFormat(stem: string, caseText: string | null): QFormat {
+  const combined = `${stem} ${caseText ?? ""}`;
+  if ((caseText && caseText.trim().length > 0) || /[A-Za-zＡ-Ｚ]\s*さん/.test(combined)) return "case";
+  if (stem.includes("用語")) return "term";
+  return "desc";
+}
+
+// 実際の過去問の分布に合わせた出題形式の抽選比率
+const FORMAT_WEIGHTS: { format: QFormat; weight: number }[] = [
+  { format: "desc", weight: 0.65 },
+  { format: "case", weight: 0.33 },
+  { format: "term", weight: 0.02 },
+];
+
+function pickFormat(): QFormat {
+  const r = Math.random();
+  let acc = 0;
+  for (const { format, weight } of FORMAT_WEIGHTS) {
+    acc += weight;
+    if (r < acc) return format;
+  }
+  return "desc";
+}
+
+const FORMAT_INSTRUCTION: Record<QFormat, string> = {
+  desc: "知識説明形式で作成すること。対象の事象・概念・制度・理論等について、正しい/誤った説明を選ばせる（case_textはnullでよい）。",
+  case: "事例形式で作成すること。「A精神保健福祉士」「Aさん」のように匿名の専門職またはクライエントを主人公にした短い場面を"
+    + "case_textに書き、その場面における適切な認識・対応・該当する概念などをstemで問う"
+    + "（例:「次のうち、Aさんの状態として、最も適切なものを1つ選びなさい」）。場面設定は根拠テキストの範囲で無理なく成立させ、"
+    + "根拠テキストに無い事実は使わない。",
+  term: "用語選択形式で作成すること。「正しい用語はどれか」のように、用語そのものを問う形にする（case_textはnullでよい）。",
+};
+
+async function fewShotExamples(subject: string, targetFormat: QFormat, n = 3): Promise<string> {
+  const { data: subjectRows } = await supabase()
     .from("past_questions")
     .select("stem, case_text, options, correct")
     .eq("subject", subject)
     .limit(20);
-  const pool = data ?? [];
+  const pool = (subjectRows ?? []).map((q) => ({
+    ...q,
+    format: classifyFormat(q.stem as string, q.case_text as string | null),
+  }));
   if (pool.length === 0) return "（この科目の過去問例なし。一般的な国家試験の五肢択一形式に従うこと）";
-  const picked = pool.sort(() => Math.random() - 0.5).slice(0, n);
-  return picked
+
+  let targetMatches = pool.filter((q) => q.format === targetFormat).sort(() => Math.random() - 0.5);
+  if (targetMatches.length === 0 && targetFormat !== "desc") {
+    // この科目の少ないサンプルにたまたま無い場合、他科目から同じ形式の実例を借りて
+    // 「書き方」だけ真似させる（内容は本問の根拠テキストの範囲で作らせるので問題ない）
+    const { data: globalRows } = await supabase().from("past_questions").select("stem, case_text, options, correct").limit(200);
+    targetMatches = (globalRows ?? [])
+      .map((q) => ({ ...q, format: classifyFormat(q.stem as string, q.case_text as string | null) }))
+      .filter((q) => q.format === targetFormat)
+      .sort(() => Math.random() - 0.5);
+  }
+
+  const chosen = targetMatches.slice(0, Math.min(n, 2));
+  const remaining = pool.filter((q) => !chosen.includes(q)).sort(() => Math.random() - 0.5);
+  const finalPicks = [...chosen, ...remaining.slice(0, Math.max(0, n - chosen.length))];
+
+  return finalPicks
     .map((q, i) => {
       const opts = (q.options as string[]).map((o, j) => `${j + 1} ${o}`).join("\n");
       const caseText = q.case_text ? `〔事例〕${q.case_text}\n` : "";
@@ -145,8 +207,10 @@ export async function generateOneQuestion(subject: string): Promise<GenerateResu
   const { main, neighbor } = await retrieveForItem(item, llm);
   if (main.length === 0) throw new Error("チャンク検索結果が空です（埋め込み投入済みか確認）");
 
-  // 3. few-shot（同科目の実際の過去問）＋この項目で既出の問題・根拠抜粋（重複回避用）
-  const fewShot = await fewShotExamples(subject);
+  // 3. 出題形式を抽選（知識説明/事例/用語選択）＋few-shot（同科目の実際の過去問）
+  //    ＋この項目で既出の問題・根拠抜粋（重複回避用）
+  const format = pickFormat();
+  const fewShot = await fewShotExamples(subject, format);
   const { stems: pastStems, excerpts: pastExcerpts } = await existingCoverage(item.id);
 
   // 固定部分（指示＋作問ルール＋根拠チャンク）: 同一項目に対する生成1〜2回目の
@@ -168,6 +232,12 @@ export async function generateOneQuestion(subject: string): Promise<GenerateResu
 - key_points はこの問題の周辺で覚えるべきことの整理（混同しやすい概念の対比など）
 - citation_chunk_ids には実際に根拠として使ったチャンクのid（整数）を入れる
 
+# 出題形式（過去問18科目分の分析に基づく3分類。毎回どれか1つを指定するので、
+# 指定された形式で作成すること。放っておくと知識説明形式ばかりに偏ってしまうため）
+- 知識説明形式（約65%）: ${FORMAT_INSTRUCTION.desc}
+- 事例形式（約33%）: ${FORMAT_INSTRUCTION.case}
+- 用語選択形式（約2%）: ${FORMAT_INSTRUCTION.term}
+
 # 出題対象
 科目: ${subject}
 出題基準の項目: ${topic}
@@ -178,7 +248,10 @@ ${chunkBlock(main)}
 # 周辺トピックのテキスト（誤答選択肢の材料に使ってよい）
 ${chunkBlock(neighbor)}`;
 
-  const variableSuffix = `# 実際の過去問の文体・形式（これに厳密に合わせる）
+  const variableSuffix = `# 今回作成する問題の出題形式
+${FORMAT_INSTRUCTION[format]}
+
+# 実際の過去問の文体・形式（これに厳密に合わせる）
 ${fewShot}
 
 # この項目で既に出題済みの問題文（重複厳禁。同じ論点の焼き直しをせず、根拠テキストの別の側面・別の記述を使うこと）
