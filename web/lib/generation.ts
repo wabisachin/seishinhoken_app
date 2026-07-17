@@ -299,10 +299,18 @@ export async function generateOneQuestion(subject: string): Promise<GenerateResu
   const fewShot = await fewShotExamples(subject, format);
   const { stems: pastStems, excerpts: pastExcerpts } = await existingCoverage(item.id);
 
-  // 固定部分（指示＋作問ルール＋根拠チャンク）: 同一項目に対する生成1〜2回目の
-  // 呼び出し間で完全に同一バイト列になる。可変部分（few-shot・既出問題・retryNote）は
-  // 必ずこの後ろに続け、先頭の固定部分がプロンプトキャッシュに乗るようにする。
-  const staticPrefix = `あなたは精神保健福祉士国家試験の作問委員です。教科書の記述のみを根拠に、本番と同水準の問題を1問作成してください。
+  // キャッシュを2段に分ける。
+  // (1) universalInstructions: 科目・項目に一切依存しない、文字通り全呼び出し共通の
+  //     指示文。科目をまたいでも同一バイト列になるため、topUpAllSubjects/Cronのように
+  //     短時間に大量の生成が走る場面ではこのブロックだけでも複数科目間でキャッシュが効く
+  //     （OpenAI/Geminiの自動プレフィックスキャッシュはブロック単位でなく生の先頭バイト列で
+  //     一致判定するため、この後段に可変部分が続いても問題ない）。
+  // (2) itemContext: 科目・項目・根拠チャンクに依存するが、同一項目に対する生成1〜2回目
+  //     （リトライ）の間では完全に同一バイト列になる部分。Anthropicは明示的なcache_control
+  //     が無いとキャッシュされず、かつブロック単位でキャッシュ境界を打つ必要があるため、
+  //     両方に別々にcache_controlを付けて、科目非依存の(1)と同一項目内の(2)それぞれで
+  //     キャッシュヒットの機会を最大化する。
+  const universalInstructions = `あなたは精神保健福祉士国家試験の作問委員です。教科書の記述のみを根拠に、本番と同水準の問題を1問作成してください。
 
 # 作問ルール
 - 問題形式は五肢択一（correct 1つ）と五肢択二（correct 2つ、問題文に「2つ選びなさい」と明記）の
@@ -351,9 +359,9 @@ export async function generateOneQuestion(subject: string): Promise<GenerateResu
 # 指定を無視すると知識説明形式ばかりに偏ってしまうため）
 - 知識説明形式: ${FORMAT_INSTRUCTION.desc}
 - 事例形式: ${FORMAT_INSTRUCTION.case}
-- 用語選択形式: ${FORMAT_INSTRUCTION.term}
+- 用語選択形式: ${FORMAT_INSTRUCTION.term}`;
 
-# 出題対象
+  const itemContext = `# 出題対象
 科目: ${subject}
 出題基準の項目: ${topic}
 
@@ -396,7 +404,11 @@ ${pastExcerpts.length ? pastExcerpts.map((e, i) => `${i + 1}. ${e}...`).join("\n
       prompt: [
         {
           role: "user",
-          content: [cachedPrefix(staticPrefix), { type: "text", text: variableSuffix + retryNote }],
+          content: [
+            cachedPrefix(universalInstructions),
+            cachedPrefix(itemContext),
+            { type: "text", text: variableSuffix + retryNote },
+          ],
         },
       ],
     });
@@ -419,18 +431,18 @@ ${pastExcerpts.length ? pastExcerpts.map((e, i) => `${i + 1}. ${e}...`).join("\n
     }
 
     // 4. 検証パス: 根拠テキストと照合
-    // ここも根拠チャンク部分は同一項目の検証呼び出し間で不変なので固定prefixとして分離する
+    // ここも生成パスと同様に、科目・項目非依存の指示文と、根拠チャンク（同一項目の
+    // 検証呼び出し間で不変）を別ブロックに分けてキャッシュの機会を最大化する。
     const optionsList = q.options.map((o, i) => `${i + 1} ${o}`).join("\n");
-    const verifyStaticPrefix = `あなたは試験問題の校閲者です。次の問題を根拠テキストと照合し、以下をすべて検証してください:
+    const verifyInstructions = `あなたは試験問題の校閲者です。次の問題を根拠テキストと照合し、以下をすべて検証してください:
 1. 正答が根拠テキストの記述で支持されること
 2. 各誤答選択肢が根拠テキストと矛盾する、または明確に誤りであること（正答になり得る誤答が無いこと）
 3. 問題文・選択肢に根拠テキストに無い事実の捏造が無いこと
 4. 五肢択一/択二として成立していること（正答が一意に定まる）
 5. 内容の知識が無くても、文体だけ（誤答だけ妙に断定的・極端・曖昧・簡潔、正答だけ自然、など）で
    消去法により正答を当てられてしまわないこと。5つの選択肢の具体性・専門用語の密度・自信の
-   度合いが揃っていない場合はここで指摘すること
-
-# 根拠テキスト
+   度合いが揃っていない場合はここで指摘すること`;
+    const verifyItemContext = `# 根拠テキスト
 ${chunkBlock(main)}
 ${chunkBlock(neighbor)}`;
     const verifyTarget = `# 問題
@@ -443,7 +455,11 @@ ${optionsList}
       prompt: [
         {
           role: "user",
-          content: [cachedPrefix(verifyStaticPrefix), { type: "text", text: verifyTarget }],
+          content: [
+            cachedPrefix(verifyInstructions),
+            cachedPrefix(verifyItemContext),
+            { type: "text", text: verifyTarget },
+          ],
         },
       ],
     });
