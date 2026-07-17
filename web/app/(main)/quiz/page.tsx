@@ -31,7 +31,8 @@ const MAX_NEXT_ATTEMPTS = 15;
 
 // 1セッションで一気に要求できる出題数の上限。ここが無いと「一度に100問」のような
 // リクエストで生成が延々と連発されてしまうため、UI側でも明示的に絞っておく。
-const MAX_SESSION_COUNT = 5;
+const DEFAULT_SESSION_COUNT = 5;
+const MAX_SESSION_COUNT = 10;
 
 // 復習モードは新規生成を一切行わない（既存問題の読み出しのみ）ため、
 // 分野別演習のコスト上限用カウント(count状態)とは無関係に、独自の出題数を使う。
@@ -87,7 +88,9 @@ function QuizInner({ mode }: { mode: Mode }) {
   const [phase, setPhase] = useState<Phase>(mode === "subject" ? "loading" : "setup");
   const [subjects, setSubjects] = useState<{ subject: string; taxonomy_items: number; kind: string | null }[]>([]);
   const [subject, setSubject] = useState("");
-  const [count, setCount] = useState(MAX_SESSION_COUNT);
+  const [count, setCount] = useState(DEFAULT_SESSION_COUNT);
+  const [countInput, setCountInput] = useState(String(DEFAULT_SESSION_COUNT));
+  const [countError, setCountError] = useState<string | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState<number[]>([]);
@@ -95,6 +98,7 @@ function QuizInner({ mode }: { mode: Mode }) {
   const [error, setError] = useState<string | null>(null);
   const [pendingResume, setPendingResume] = useState<PersistedSubjectSession | null>(null);
   const [generatingAttempt, setGeneratingAttempt] = useState(0);
+  const [expandedCitation, setExpandedCitation] = useState<number | null>(null);
   const cancelledRef = useRef(false);
   const prefetchedForIndexRef = useRef<number | null>(null);
   const prefetchPromiseRef = useRef<Promise<{ question: Question | null; exhausted: boolean } | null> | null>(null);
@@ -138,6 +142,7 @@ function QuizInner({ mode }: { mode: Mode }) {
       .filter((r): r is AnswerRecord => r !== null);
     setSubject(pendingResume.subject);
     setCount(pendingResume.count);
+    setCountInput(String(pendingResume.count));
     setQuestions(pendingResume.questions);
     setIndex(pendingResume.index);
     setRecords(restoredRecords);
@@ -277,6 +282,7 @@ function QuizInner({ mode }: { mode: Mode }) {
   }
 
   async function next() {
+    setExpandedCitation(null);
     if (mode === "subject") {
       if (records.length >= count) {
         clearSubjectSession();
@@ -384,18 +390,50 @@ function QuizInner({ mode }: { mode: Mode }) {
             <label className="mt-4 block text-sm font-medium">出題数</label>
             <input
               type="number"
+              inputMode="numeric"
               min={1}
               max={MAX_SESSION_COUNT}
-              value={count}
+              value={countInput}
               onChange={(e) => {
-                const n = parseInt(e.target.value || "1", 10);
-                setCount(Math.min(MAX_SESSION_COUNT, Math.max(1, Number.isNaN(n) ? 1 : n)));
+                const raw = e.target.value;
+                setCountInput(raw);
+                if (raw === "") {
+                  setCountError(null);
+                  return;
+                }
+                const n = parseInt(raw, 10);
+                if (Number.isNaN(n)) {
+                  setCountError("数字を入力してください。");
+                } else if (n > MAX_SESSION_COUNT) {
+                  setCountError(`1セッションあたり最大${MAX_SESSION_COUNT}問までです。それ以上は選択できません。`);
+                  setCount(MAX_SESSION_COUNT);
+                } else if (n < 1) {
+                  setCountError("1問以上を指定してください。");
+                } else {
+                  setCountError(null);
+                  setCount(n);
+                }
+              }}
+              onBlur={() => {
+                const n = parseInt(countInput, 10);
+                if (countInput === "" || Number.isNaN(n) || n < 1) {
+                  setCountInput(String(DEFAULT_SESSION_COUNT));
+                  setCount(DEFAULT_SESSION_COUNT);
+                } else if (n > MAX_SESSION_COUNT) {
+                  setCountInput(String(MAX_SESSION_COUNT));
+                  setCount(MAX_SESSION_COUNT);
+                }
+                setCountError(null);
               }}
               className="mt-1 min-h-12 w-24 rounded-xl border border-stone-300 p-3"
             />
-            <p className="mt-1 text-xs text-stone-400">
-              一度に生成される問題数を抑えるため、1セッションあたり最大{MAX_SESSION_COUNT}問までです。
-            </p>
+            {countError ? (
+              <p className="mt-1 text-xs text-red-600">{countError}</p>
+            ) : (
+              <p className="mt-1 text-xs text-stone-400">
+                一度に生成される問題数を抑えるため、1セッションあたり最大{MAX_SESSION_COUNT}問までです。
+              </p>
+            )}
             <div className="mt-4">
               <button
                 onClick={start}
@@ -594,14 +632,30 @@ function QuizInner({ mode }: { mode: Mode }) {
           {q.citations && q.citations.length > 0 && (
             <div className="rounded-2xl bg-white p-5 shadow-warm">
               <h3 className="mb-2 font-bold text-stone-700">教科書の根拠</h3>
-              <ul className="space-y-1">
-                {dedupeCitations(q.citations).map((c, i) => (
-                  <li key={i} className="flex items-baseline gap-2 text-sm text-stone-600">
-                    <span className="text-indigo-300">・</span>
-                    {c.book} p.{c.page_start}
-                    {c.page_end !== c.page_start ? `–${c.page_end}` : ""}
-                  </li>
-                ))}
+              <ul className="space-y-2">
+                {dedupeCitations(q.citations).map((c, i) => {
+                  const expanded = expandedCitation === i;
+                  return (
+                    <li key={i} className="rounded-xl border border-stone-100">
+                      <button
+                        onClick={() => setExpandedCitation(expanded ? null : i)}
+                        className="flex min-h-10 w-full items-center gap-2 p-2 text-left text-sm text-stone-600"
+                      >
+                        <span className="text-indigo-300">・</span>
+                        <span className="flex-1">
+                          {c.book} p.{c.page_start}
+                          {c.page_end !== c.page_start ? `–${c.page_end}` : ""}
+                        </span>
+                        <span className="shrink-0 text-xs font-bold text-indigo-500">{expanded ? "－" : "＋"}</span>
+                      </button>
+                      {expanded && (
+                        <p className="whitespace-pre-wrap border-t border-stone-100 p-3 text-sm leading-relaxed text-stone-600">
+                          {c.excerpt}
+                        </p>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}

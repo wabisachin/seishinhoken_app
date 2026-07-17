@@ -132,6 +132,7 @@ export default function MockQuiz() {
   const [pendingResume, setPendingResume] = useState<Persisted | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [expandedCitation, setExpandedCitation] = useState<number | null>(null);
   const [generatingAttempt, setGeneratingAttempt] = useState(0);
   // 科目ごとに1回だけ取得を開始し、結果(または進行中のPromise)をキャッシュする。
   // ページ送りのたびに「その場で次を生成」するのではなく、模試が始まったら
@@ -454,7 +455,10 @@ export default function MockQuiz() {
             return (
               <div key={q.id} className="rounded-xl bg-white shadow-warm-sm">
                 <button
-                  onClick={() => setExpandedId(expanded ? null : q.id)}
+                  onClick={() => {
+                    setExpandedId(expanded ? null : q.id);
+                    setExpandedCitation(null);
+                  }}
                   className="flex min-h-12 w-full items-center gap-3 p-3 text-left text-sm"
                 >
                   <span className={a.isCorrect ? "text-green-600" : "text-red-600"}>{a.isCorrect ? "○" : "×"}</span>
@@ -521,14 +525,30 @@ export default function MockQuiz() {
                     {q.citations && q.citations.length > 0 && (
                       <div>
                         <h3 className="mb-1 font-bold text-stone-700">教科書の根拠</h3>
-                        <ul className="space-y-1">
-                          {dedupeCitations(q.citations).map((c, ci) => (
-                            <li key={ci} className="flex items-baseline gap-2 text-stone-600">
-                              <span className="text-indigo-300">・</span>
-                              {c.book} p.{c.page_start}
-                              {c.page_end !== c.page_start ? `–${c.page_end}` : ""}
-                            </li>
-                          ))}
+                        <ul className="space-y-2">
+                          {dedupeCitations(q.citations).map((c, ci) => {
+                            const citeExpanded = expandedCitation === ci;
+                            return (
+                              <li key={ci} className="rounded-xl border border-stone-100">
+                                <button
+                                  onClick={() => setExpandedCitation(citeExpanded ? null : ci)}
+                                  className="flex min-h-10 w-full items-center gap-2 p-2 text-left text-stone-600"
+                                >
+                                  <span className="text-indigo-300">・</span>
+                                  <span className="flex-1">
+                                    {c.book} p.{c.page_start}
+                                    {c.page_end !== c.page_start ? `–${c.page_end}` : ""}
+                                  </span>
+                                  <span className="shrink-0 text-xs font-bold text-indigo-500">{citeExpanded ? "－" : "＋"}</span>
+                                </button>
+                                {citeExpanded && (
+                                  <p className="whitespace-pre-wrap border-t border-stone-100 p-3 leading-relaxed text-stone-600">
+                                    {c.excerpt}
+                                  </p>
+                                )}
+                              </li>
+                            );
+                          })}
                         </ul>
                       </div>
                     )}
