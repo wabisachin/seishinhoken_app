@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { logError } from "@/lib/errorLog";
+import { computeWrongStock } from "@/lib/reviewStock";
 
 // 苦手科目の「今の」優先度を測る窓。数ヶ月前に苦手だった科目がその後克服されても
 // 全期間累積だと正答率が低いまま表示され続け、逆に最近伸び悩んでいる科目が過去の
@@ -24,24 +25,16 @@ export async function GET() {
       .order("answered_at", { ascending: false });
     if (error) throw new Error(error.message);
 
-    // 弱点ストック（今も間違えたまま残っている問題数）は問題ごとの最新解答で判定する。
-    // これは全期間で見る（間違えた問題は解き直して正解するまでずっとストックに残るのが
-    // このアプリの学習ゴールであり、直近何件かで判定するものではない）
-    const latestByQuestion = new Map<number, { ok: boolean; subject: string }>();
-    for (const a of attempts ?? []) {
-      if (latestByQuestion.has(a.question_id)) continue;
-      const subject = (a.questions as unknown as { subject: string } | null)?.subject;
-      if (!subject) continue;
-      latestByQuestion.set(a.question_id, { ok: a.is_correct as boolean, subject });
-    }
+    // 弱点ストック（今も間違えたまま残っている問題数）は、一度でも間違えたことがあり
+    // 直近3問連続正解で卒業していない問題の数。これは全期間で見る（間違えた問題は
+    // 解き直して正解するまでずっとストックに残るのがこのアプリの学習ゴールであり、
+    // 直近何件かで判定するものではない）
+    const wrongStock = await computeWrongStock();
     const wrongCountBySubject = new Map<string, number>();
-    let totalWrong = 0;
-    for (const { ok, subject } of latestByQuestion.values()) {
-      if (!ok) {
-        wrongCountBySubject.set(subject, (wrongCountBySubject.get(subject) ?? 0) + 1);
-        totalWrong++;
-      }
+    for (const { subject } of wrongStock.values()) {
+      wrongCountBySubject.set(subject, (wrongCountBySubject.get(subject) ?? 0) + 1);
     }
+    const totalWrong = wrongStock.size;
 
     // 一方、「今どの科目を優先すべきか」の正答率ランキングは直近RECENT_WINDOW件のみで見る
     const recentBySubject = new Map<string, boolean[]>();

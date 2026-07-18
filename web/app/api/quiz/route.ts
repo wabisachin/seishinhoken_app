@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import type { Question } from "@/lib/types";
 import { logError } from "@/lib/errorLog";
+import { computeWrongStock } from "@/lib/reviewStock";
 
 export const maxDuration = 60;
 
@@ -46,34 +47,20 @@ export async function GET(req: NextRequest) {
     }
 
     if (mode === "review") {
-      // 全attemptsを新しい順に取得し、問題ごとの最新解答が誤答のものを対象にする。
+      // 弱点ストック（一度でも間違えたことがあり、直近3問連続正解で卒業していない問題）を対象にする。
       // 本人(profile='self')の解答だけを対象にし、応援する人の解答は無視する
       const reviewSubject = params.get("subject"); // 未指定 or "all" なら全科目対象
-      const { data: attempts, error } = await sb
-        .from("attempts")
-        .select("question_id, is_correct, answered_at, questions!inner(subject)")
-        .eq("profile", "self")
-        .order("answered_at", { ascending: false });
-      if (error) throw new Error(error.message);
-      const latest = new Map<number, boolean>();
-      const wrongCount = new Map<number, number>();
-      const subjectById = new Map<number, string>();
-      for (const a of attempts ?? []) {
-        const qSubject = (a.questions as unknown as { subject: string } | null)?.subject;
-        if (qSubject) subjectById.set(a.question_id, qSubject);
-        if (!latest.has(a.question_id)) latest.set(a.question_id, a.is_correct);
-        if (!a.is_correct) wrongCount.set(a.question_id, (wrongCount.get(a.question_id) ?? 0) + 1);
-      }
-      let wrongIds = [...latest.entries()].filter(([, ok]) => !ok).map(([id]) => id);
+      const wrongStock = await computeWrongStock();
+      let entries = [...wrongStock.entries()];
       if (reviewSubject && reviewSubject !== "all") {
-        wrongIds = wrongIds.filter((id) => subjectById.get(id) === reviewSubject);
+        entries = entries.filter(([, e]) => e.subject === reviewSubject);
       }
-      if (wrongIds.length === 0) return NextResponse.json({ questions: [] });
+      if (entries.length === 0) return NextResponse.json({ questions: [] });
 
-      // 科目は問わず全間違い問題からランダムに選ぶ。ただし固定の上位N件を毎回
+      // 科目は問わず全弱点ストックからランダムに選ぶ。ただし固定の上位N件を毎回
       // 出すのではなく、間違えた回数が多い問題ほど選ばれやすい重み付き抽選にする
       // （そうしないと「もう一度」しても常に同じ問題・同じ並びになってしまう）
-      const remaining = wrongIds.map((id) => ({ id, weight: wrongCount.get(id) ?? 1 }));
+      const remaining = entries.map(([id, e]) => ({ id, weight: e.missCount }));
       const targetIds: number[] = [];
       const n = Math.min(count, remaining.length);
       for (let i = 0; i < n; i++) {
