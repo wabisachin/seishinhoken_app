@@ -32,7 +32,11 @@ export default function GuidePage() {
           </div>
           <div>
             <p className="font-medium text-stone-900">③ 復習モード</p>
-            <p className="mt-1">間違えた問題を優先的にもう一度出題します。苦手の潰し込みに使ってください。</p>
+            <p className="mt-1">
+              分野別演習・ミニ模試で間違えた問題は自動的にここに溜まります。科目を選ぶか全科目からまとめて、
+              間違えた回数が多いものほど優先的に再出題されます。この学習の最終ゴールは、ホーム画面に出る
+              「間違えたまま残っている問題数」を0にすることです。
+            </p>
           </div>
         </div>
       </section>

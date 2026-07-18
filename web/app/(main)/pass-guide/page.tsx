@@ -40,6 +40,25 @@ export default function PassGuidePage() {
         年度によって変わる数値（合格ラインの実際の点数など）は、直近の回の実績として記載しています。
       </p>
 
+      <section className="rounded-2xl border-l-4 border-rose-400 bg-white p-5 shadow-warm">
+        <h2 className="font-bold text-rose-700">このアプリでの学習のゴール</h2>
+        <div className="mt-2 space-y-2 text-sm leading-relaxed text-stone-700">
+          <p>
+            分野別演習・全分野ミニ模試で間違えた問題は、自動的に「弱点ストック」として記録されます。
+            復習モードでは、そのストックの中から間違えた回数が多いものほど優先的に出題されます。
+          </p>
+          <p className="font-medium text-rose-800">
+            この学習の最終ゴールは、弱点ストックに残っている問題を復習モードで解き直し続け、
+            最終的に「間違えたまま残っている問題が0問」の状態にすることです。
+          </p>
+          <p>
+            ホーム画面には常に現在の弱点ストック数が表示されます。演習・模試で新しい間違いが増えても、
+            復習モードで解き直して正解すればストックから減っていきます。この数を追いかけることが、
+            日々何をすればいいか迷ったときの一番シンプルな指針になります。
+          </p>
+        </div>
+      </section>
+
       <section className="rounded-2xl bg-white p-5 shadow-warm">
         <h2 className="font-bold text-indigo-700">この試験の全体像</h2>
         <p className="mt-2 text-sm leading-relaxed text-stone-700">
@@ -123,14 +142,17 @@ export default function PassGuidePage() {
         <h2 className="font-bold text-indigo-700">出題形式の傾向（本アプリの過去問分析より）</h2>
         <div className="mt-2 space-y-2 text-sm leading-relaxed text-stone-700">
           <p>
-            第27回・第28回の過去問264問を分析したところ、出題は大きく3パターンに分かれます。
+            第27回・第28回の過去問264問を全問精査したところ、出題は大きく3パターンに分かれます。
             <span className="font-medium">知識説明形式</span>
-            （事象・概念・制度・理論について正しい説明を選ぶ、全体の約68%）が中心ですが、
+            （事象・概念・制度・理論を、文単位の説明文の正誤で問う、全体の約56%）が中心ですが、
             <span className="font-medium">事例形式</span>
             （「A精神保健福祉士」「Aさん」など匿名の専門職・クライエントの短い場面を読んで、適切な対応や
-            該当する概念を選ぶ、約31%）も科目によっては半数以上を占めます。
-            <span className="font-medium">用語選択形式</span>
-            （「正しい用語はどれか」を直接問う、約1%）はまれです。
+            該当する概念を選ぶ、約24%）も科目によっては半数以上を占めます。
+            <span className="font-medium">用語・名称選択形式</span>
+            （選択肢が完全な説明文ではなく、病名・制度名・役職名などの短い用語そのものになっている形式。
+            「正しい用語はどれか」と明示するstemは実はまれですが、選択肢の構造まで見ると全体の約19%を占め、
+            医学概論・精神医学と精神医療などの科目に偏って多く出ます。ごくまれに、用語とその属性
+            （時期・分類等）のペアを1行ずつ選択肢に並べる形式もあります）も無視できない比率です。
           </p>
           <p>
             また、正答が1つの五肢択一が約76%、2つ選ぶ五肢択二が約24%です。事例形式は択一の比率がやや高く、
@@ -217,7 +239,10 @@ export default function PassGuidePage() {
           </li>
           <li className="flex gap-2">
             <span className="text-indigo-400">・</span>
-            <span>間違えた問題は復習モードで、間違えた回数が多いものほど優先的に再出題されます。</span>
+            <span>
+              間違えた問題は自動的に弱点ストックに入り、復習モードで間違えた回数が多いものほど優先的に
+              再出題されます。ホーム画面の弱点ストック数を0に近づけることを、日々の目標にしてください。
+            </span>
           </li>
         </ul>
       </section>
