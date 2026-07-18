@@ -5,6 +5,7 @@ import { supabase } from "./supabase";
 import { retrieveForItem, RetrievedChunk, TaxonomyItem } from "./retrieval";
 import { getLlmSettings } from "./appSettings";
 import { logUsage } from "./usageLog";
+import { logError } from "./errorLog";
 
 /**
  * プロンプトキャッシング対策: 同じ項目に対する生成1〜2回目・検証呼び出しは
@@ -429,7 +430,12 @@ ${pastExcerpts.length ? pastExcerpts.map((e, i) => `${i + 1}. ${e}...`).join("\n
     const retryNote = lastProblems.length
       ? `\n\n# 前回生成の問題点（必ず修正すること）\n- ${lastProblems.join("\n- ")}`
       : "";
-    const { object: q, usage: generateUsage } = await generateObject({
+    const {
+      object: q,
+      usage: generateUsage,
+      providerMetadata: generateProviderMeta,
+      response: generateResponse,
+    } = await generateObject({
       model,
       schema: questionSchema,
       prompt: [
@@ -444,6 +450,16 @@ ${pastExcerpts.length ? pastExcerpts.map((e, i) => `${i + 1}. ${e}...`).join("\n
       ],
     });
     await logUsage({ source: "generate", subject, provider: llm.provider, model: modelName, usage: generateUsage });
+    // 一時診断（キャッシュヒット率0%調査用）: logUsageは`cachedInputTokens ?? 0`で
+    // 「undefined（フィールド未取得）」と「本当に0」を区別できず握りつぶしてしまうため、
+    // JSON.stringifyでキー自体の有無が分かる生データをerror_logsに残す。原因判明後に削除する。
+    void logError("usage-debug", new Error("diag"), {
+      subject,
+      source: "generate",
+      usageRaw: JSON.stringify(generateUsage),
+      providerMetadata: generateProviderMeta,
+      responseBodyUsage: (generateResponse?.body as { usage?: unknown } | undefined)?.usage,
+    });
     q.options = q.options.map((o, i) => stripLeadingOptionNumber(o, i + 1));
     lastQ = q;
 
