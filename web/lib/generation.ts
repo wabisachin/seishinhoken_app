@@ -438,6 +438,10 @@ ${pastExcerpts.length ? pastExcerpts.map((e, i) => `${i + 1}. ${e}...`).join("\n
     } = await generateObject({
       model,
       schema: questionSchema,
+      // OpenAIのプロンプトキャッシュはリクエストを同じバックエンドに寄せる
+      // ルーティングに依存するため、prompt_cache_keyを固定しないと同一の
+      // 先頭バイト列でもヒットしない（他プロバイダは未知のproviderOptionsを無視するだけ）
+      providerOptions: { openai: { promptCacheKey: "quiz-generate-v1" } },
       prompt: [
         {
           role: "user",
@@ -503,6 +507,7 @@ ${optionsList}
     const { object: verdict, usage: verifyUsage } = await generateObject({
       model,
       schema: verifySchema,
+      providerOptions: { openai: { promptCacheKey: "quiz-verify-v1" } },
       prompt: [
         {
           role: "user",
