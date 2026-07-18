@@ -14,6 +14,8 @@ type ExamState = {
   commonStatus?: ExamStatusValue;
   specializedStatus?: ExamStatusValue;
   remainingThisMonth: number;
+  commonReady: boolean;
+  specializedReady: boolean;
 };
 type Answer = { selected: number[]; isCorrect: boolean };
 type SubjectScore = { subject: string; correct: number; total: number };
@@ -311,8 +313,18 @@ export default function ExamQuiz() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {(["common", "specialized"] as ExamPart[]).map((p) => {
             const status = statusOf(p);
-            const locked = status === "completed";
-            const label = locked ? "この回では受験済みです" : status === "in_progress" ? "続きから再開する" : "タップして開始";
+            const ready = p === "common" ? state.commonReady : state.specializedReady;
+            // 未着手のパートは、最後まですらすら出せるだけの在庫が揃っていない間は
+            // 押せないようにする（受験開始後に問題切れで止まる事態を避けるため）
+            const notReady = status === "not_started" && !ready;
+            const locked = status === "completed" || notReady;
+            const label = locked
+              ? status === "completed"
+                ? "この回では受験済みです"
+                : "問題準備中です（しばらくしてから再度お試しください）"
+              : status === "in_progress"
+                ? "続きから再開する"
+                : "タップして開始";
             return (
               <button
                 key={p}
