@@ -44,8 +44,10 @@ export const EXAM_SUBJECT_GROUPS: { label: string; subjects: string[] }[] = [
 ];
 
 export const EXAM_PASS_SCORE_RATE = 0.6;
-// 実戦模試ストックとして常時確保しておく「回」数（1回=共通84問+専門48問ぶん）
-export const EXAM_STOCK_SESSIONS_AHEAD = 5;
+// 実戦模試ストックとして常時確保しておく「回」数（1回=共通84問+専門48問ぶん）。
+// 月次上限(EXAM_MONTHLY_LIMIT)とは別の値 ── こちらは裏側の在庫バッファの厚みで、
+// 大きいほど初回ビルドアップが長くかかるだけなので、月の上限と一致させる必要は無い。
+export const EXAM_STOCK_SESSIONS_AHEAD = 3;
 export const EXAM_MONTHLY_LIMIT = 5;
 
 export function subjectsForPart(part: ExamPart): { subject: string; questions: number }[] {
