@@ -307,8 +307,17 @@ export type GenerateResult = {
  * 指定させる経路は無い ── これを崩すと「ユーザーが勝手にモデルを変更できる」
  * ことになり、管理者専用にする要件そのものが破られるため、ここに引数を
  * 増やして呼び出し元から渡させるようなことは絶対にしないこと。
+ *
+ * poolだけは例外（サーバー内部のストック補充ロジックだけが渡す値で、クライアントから
+ * 到達できないため上記の制約には抵触しない）。'exam'を指定すると実戦模試専用の
+ * 未消費ストックとして書き込まれ、通常の分野別演習・ミニ模試の出題プールからは
+ * 見えなくなる（questionSupply.ts側でpool='general'にフィルタしているため）。
  */
-export async function generateOneQuestion(subject: string): Promise<GenerateResult> {
+export async function generateOneQuestion(
+  subject: string,
+  opts: { pool?: "general" | "exam" } = {},
+): Promise<GenerateResult> {
+  const pool = opts.pool ?? "general";
   const sb = supabase();
   const llm = await getLlmSettings();
 
@@ -558,6 +567,7 @@ ${optionsList}
         citations,
         status,
         model: modelName,
+        pool,
       })
       .select("id")
       .single();
@@ -592,6 +602,7 @@ ${optionsList}
       citations: null,
       status: "rejected",
       model: modelName,
+      pool,
     });
   }
 
