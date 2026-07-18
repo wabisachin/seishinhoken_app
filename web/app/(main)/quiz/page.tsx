@@ -519,7 +519,7 @@ function QuizInner({ mode }: { mode: Mode }) {
                   <p className="mt-1 text-sm text-stone-600">間違えた問題 {reviewTotalWrong}問から、間違えた回数が多いものほど出やすいランダム出題</p>
                 </button>
                 <div>
-                  <p className="mb-2 text-sm font-medium text-stone-700">科目ごとに復習する（正答率が低いほど目立ちます）</p>
+                  <p className="mb-2 text-sm font-medium text-stone-700">科目ごとに復習する</p>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     {reviewSubjects.map((s) => {
                       // 苦手判定は間違えた問題数の絶対数ではなく正答率で行う
