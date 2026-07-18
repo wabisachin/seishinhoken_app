@@ -31,11 +31,30 @@ export async function GET(req: NextRequest) {
           : [...(typedRow.common_question_ids ?? []), ...(typedRow.specialized_question_ids ?? [])];
     if (ids.length === 0) return NextResponse.json({ questions: [] });
 
-    const { data, error: qError } = await sb.from("questions").select(QUESTION_COLS).in("id", ids);
+    const [{ data, error: qError }, { data: attempts }] = await Promise.all([
+      sb.from("questions").select(QUESTION_COLS).in("id", ids),
+      sb
+        .from("attempts")
+        .select("question_id, selected, is_correct, answered_at")
+        .eq("exam_attempt_id", examAttemptId)
+        .in("question_id", ids)
+        .order("answered_at", { ascending: false }),
+    ]);
     if (qError) throw new Error(qError.message);
     const byId = new Map(((data ?? []) as Question[]).map((q) => [q.id, q]));
-    // 出題順（保存されたquestion_idsの並び）を維持して返す
-    const questions = ids.map((id) => byId.get(id)).filter((q): q is Question => Boolean(q));
+    // 同じ問題に複数attemptsがあれば最新のものを採用（通常は1問1回のみのはず）
+    const answerByQuestion = new Map<number, { selected: number[]; isCorrect: boolean }>();
+    for (const a of attempts ?? []) {
+      if (!answerByQuestion.has(a.question_id)) {
+        answerByQuestion.set(a.question_id, { selected: a.selected as number[], isCorrect: a.is_correct as boolean });
+      }
+    }
+    // 出題順（保存されたquestion_idsの並び）を維持して返す。yourAnswerは結果詳細画面用
+    // （そのexam_attempt内での解答。まだ解答していない設問はnull）
+    const questions = ids
+      .map((id) => byId.get(id))
+      .filter((q): q is Question => Boolean(q))
+      .map((q) => ({ ...q, yourAnswer: answerByQuestion.get(q.id) ?? null }));
     return NextResponse.json({ questions });
   } catch (e) {
     await logError("exam-questions", e);
