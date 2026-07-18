@@ -48,19 +48,26 @@ export async function GET(req: NextRequest) {
     if (mode === "review") {
       // 全attemptsを新しい順に取得し、問題ごとの最新解答が誤答のものを対象にする。
       // 本人(profile='self')の解答だけを対象にし、応援する人の解答は無視する
+      const reviewSubject = params.get("subject"); // 未指定 or "all" なら全科目対象
       const { data: attempts, error } = await sb
         .from("attempts")
-        .select("question_id, is_correct, answered_at")
+        .select("question_id, is_correct, answered_at, questions!inner(subject)")
         .eq("profile", "self")
         .order("answered_at", { ascending: false });
       if (error) throw new Error(error.message);
       const latest = new Map<number, boolean>();
       const wrongCount = new Map<number, number>();
+      const subjectById = new Map<number, string>();
       for (const a of attempts ?? []) {
+        const qSubject = (a.questions as unknown as { subject: string } | null)?.subject;
+        if (qSubject) subjectById.set(a.question_id, qSubject);
         if (!latest.has(a.question_id)) latest.set(a.question_id, a.is_correct);
         if (!a.is_correct) wrongCount.set(a.question_id, (wrongCount.get(a.question_id) ?? 0) + 1);
       }
-      const wrongIds = [...latest.entries()].filter(([, ok]) => !ok).map(([id]) => id);
+      let wrongIds = [...latest.entries()].filter(([, ok]) => !ok).map(([id]) => id);
+      if (reviewSubject && reviewSubject !== "all") {
+        wrongIds = wrongIds.filter((id) => subjectById.get(id) === reviewSubject);
+      }
       if (wrongIds.length === 0) return NextResponse.json({ questions: [] });
 
       // 科目は問わず全間違い問題からランダムに選ぶ。ただし固定の上位N件を毎回

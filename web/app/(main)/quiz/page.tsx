@@ -99,6 +99,9 @@ function QuizInner({ mode }: { mode: Mode }) {
   const [pendingResume, setPendingResume] = useState<PersistedSubjectSession | null>(null);
   const [generatingAttempt, setGeneratingAttempt] = useState(0);
   const [expandedCitation, setExpandedCitation] = useState<number | null>(null);
+  const [reviewSubjects, setReviewSubjects] = useState<{ subject: string; wrongCount: number }[]>([]);
+  const [reviewTotalWrong, setReviewTotalWrong] = useState(0);
+  const [reviewSummaryLoading, setReviewSummaryLoading] = useState(true);
   const cancelledRef = useRef(false);
   // 分野別モード: セッション開始直後から、残り問題を裏で連続的に先読みしておく
   // （1問先読みだけだと、読むのが速いユーザーには追いつけないため、模試の
@@ -113,6 +116,16 @@ function QuizInner({ mode }: { mode: Mode }) {
       fetch("/api/subjects")
         .then((r) => r.json())
         .then((d) => setSubjects((d.subjects ?? []).filter((s: { taxonomy_items: number }) => s.taxonomy_items > 0)));
+    }
+    if (mode === "review") {
+      setReviewSummaryLoading(true);
+      fetch("/api/quiz/review-summary")
+        .then((r) => r.json())
+        .then((d) => {
+          setReviewSubjects(d.subjects ?? []);
+          setReviewTotalWrong(d.totalWrong ?? 0);
+        })
+        .finally(() => setReviewSummaryLoading(false));
     }
   }, [mode]);
 
@@ -256,6 +269,7 @@ function QuizInner({ mode }: { mode: Mode }) {
     }
 
     const qs = new URLSearchParams({ mode, count: String(mode === "review" ? REVIEW_COUNT : count) });
+    if (mode === "review") qs.set("subject", subject || "all");
     const res = await fetch(`/api/quiz?${qs}`);
     const d = await res.json();
     if (d.error) {
@@ -272,14 +286,6 @@ function QuizInner({ mode }: { mode: Mode }) {
     setIndex(0);
     setPhase("answering");
   }, [mode, subject, count, waitForNextSubjectQuestion]);
-
-  // 復習モードは即開始できる
-  useEffect(() => {
-    if (mode === "review" && phase === "setup" && questions.length === 0 && !error) {
-      start();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
 
   const q = questions[index];
   const maxSelect = q?.question_type === "multi" ? 2 : 1;
@@ -484,8 +490,73 @@ function QuizInner({ mode }: { mode: Mode }) {
             </div>
           </div>
         )}
-        {mode !== "subject" && !error && <p className="text-sm text-stone-600">読み込み中...</p>}
-        {mode !== "subject" && error && (
+        {mode === "review" && !error && (
+          <>
+            {reviewSummaryLoading ? (
+              <p className="text-sm text-stone-600">読み込み中...</p>
+            ) : reviewSubjects.length === 0 ? (
+              <div className="rounded-2xl bg-white p-5 shadow-warm">
+                <p className="text-sm text-stone-600">間違えた問題がまだありません。まず演習してみましょう。</p>
+                <Link
+                  href="/"
+                  className="mt-3 inline-flex min-h-12 items-center rounded-xl bg-indigo-600 px-5 py-3 font-medium text-white transition-colors hover:bg-indigo-700"
+                >
+                  ダッシュボードへ
+                </Link>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <button
+                  onClick={() => {
+                    setSubject("all");
+                    void start();
+                  }}
+                  className="w-full rounded-2xl border-l-4 border-indigo-500 bg-white p-4 text-left shadow-warm transition-all hover:-translate-y-0.5 hover:shadow-warm-lg"
+                >
+                  <p className="font-bold text-indigo-700">全科目から出題</p>
+                  <p className="mt-1 text-sm text-stone-600">間違えた問題 {reviewTotalWrong}問から、間違えた回数が多いものほど出やすいランダム出題</p>
+                </button>
+                <div>
+                  <p className="mb-2 text-sm font-medium text-stone-700">科目ごとに復習する（苦手なほど数字が目立ちます）</p>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {reviewSubjects.map((s) => {
+                      const maxWrong = reviewSubjects[0]?.wrongCount ?? 1;
+                      const ratio = s.wrongCount / Math.max(maxWrong, 1);
+                      const style =
+                        ratio >= 0.7
+                          ? "border-red-500 bg-red-50"
+                          : ratio >= 0.4
+                            ? "border-amber-500 bg-amber-50"
+                            : "border-stone-300 bg-white";
+                      const badgeStyle =
+                        ratio >= 0.7
+                          ? "bg-red-600 text-white"
+                          : ratio >= 0.4
+                            ? "bg-amber-500 text-white"
+                            : "bg-stone-200 text-stone-700";
+                      return (
+                        <button
+                          key={s.subject}
+                          onClick={() => {
+                            setSubject(s.subject);
+                            void start();
+                          }}
+                          className={`flex items-center justify-between rounded-xl border-l-4 p-3 text-left shadow-warm-sm transition-all hover:-translate-y-0.5 hover:shadow-warm ${style}`}
+                        >
+                          <span className="text-sm font-medium text-stone-800">{s.subject}</span>
+                          <span className={`ml-2 shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${badgeStyle}`}>
+                            {s.wrongCount}問
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+        {mode !== "subject" && mode !== "review" && error && (
           <Link href="/" className="inline-flex min-h-12 items-center rounded-xl bg-indigo-600 px-5 py-3 font-medium text-white transition-colors hover:bg-indigo-700">
             ダッシュボードへ
           </Link>
@@ -548,13 +619,18 @@ function QuizInner({ mode }: { mode: Mode }) {
               setQuestions([]);
               setError(null);
               if (mode === "review") {
-                // 復習モードは科目選択が無く即開始のため、setup画面任せにすると
-                // 「setupに戻ったら自動開始する」effectがmode不変では再発火せず、
-                // 読み込み中のまま止まってしまう。ここで直接再開始する
-                void start();
-              } else {
-                setPhase("setup");
+                // 科目選択をやり直せるよう、選択画面に戻す（成績が変わっている可能性もあるため
+                // 苦手科目の集計も再取得する）
+                setReviewSummaryLoading(true);
+                fetch("/api/quiz/review-summary")
+                  .then((r) => r.json())
+                  .then((d) => {
+                    setReviewSubjects(d.subjects ?? []);
+                    setReviewTotalWrong(d.totalWrong ?? 0);
+                  })
+                  .finally(() => setReviewSummaryLoading(false));
               }
+              setPhase("setup");
             }}
             className="min-h-12 rounded-xl bg-indigo-600 px-5 py-3 font-medium text-white transition-colors hover:bg-indigo-700"
           >

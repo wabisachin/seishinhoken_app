@@ -34,7 +34,7 @@ export default function Dashboard() {
           className="rounded-2xl border-l-4 border-indigo-400 bg-white p-5 shadow-warm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-warm-lg"
         >
           <h2 className="font-bold text-indigo-700">分野別演習</h2>
-          <p className="mt-1 text-sm text-stone-600">科目を選んで集中的に演習（各科目とも新しい問題を裏側で常にストックしています）</p>
+          <p className="mt-1 text-sm text-stone-600">科目を選んで集中的に演習</p>
         </Link>
         <Link
           href="/quiz?mode=mock"
