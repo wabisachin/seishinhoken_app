@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { Question } from "@/lib/types";
-import { dedupeCitations } from "@/lib/citations";
 import { getStoredProfile } from "@/lib/profile";
 
 const PAGE_SIZE = 3;
@@ -131,8 +130,7 @@ export default function MockQuiz() {
   const [error, setError] = useState<string | null>(null);
   const [pendingResume, setPendingResume] = useState<Persisted | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [expandedId, setExpandedId] = useState<number | null>(null);
-  const [expandedCitation, setExpandedCitation] = useState<number | null>(null);
+  const [expandedSubject, setExpandedSubject] = useState<string | null>(null);
   const [generatingAttempt, setGeneratingAttempt] = useState(0);
   // 科目ごとに1回だけ取得を開始し、結果(または進行中のPromise)をキャッシュする。
   // ページ送りのたびに「その場で次を生成」するのではなく、模試が始まったら
@@ -411,6 +409,17 @@ export default function MockQuiz() {
     const overallCorrect = rows.reduce((sum, r) => sum + r.correct, 0);
     const overallTotal = rows.reduce((sum, r) => sum + r.total, 0);
 
+    // 詳細（問題ごとの解答・解説）は科目単位でまとめ、「詳細」ボタンを押した科目だけ
+    // 展開する。模試は問題数が多いため、常に全問展開だと情報量が多すぎるための工夫。
+    const questionsBySubject = new Map<string, { q: Question; a: Answer }[]>();
+    for (const q of questions) {
+      const a = answers[q.id];
+      if (!a) continue;
+      const list = questionsBySubject.get(q.subject) ?? [];
+      list.push({ q, a });
+      questionsBySubject.set(q.subject, list);
+    }
+
     return (
       <div className="space-y-4">
         <h1 className="text-xl font-bold">模試結果（{SESSION_LABEL[sessionKind]}）</h1>
@@ -449,111 +458,79 @@ export default function MockQuiz() {
         </div>
 
         <div className="space-y-2">
-          <h2 className="font-bold text-stone-700">問題ごとの解説</h2>
-          {questions.map((q, i) => {
-            const a = answers[q.id];
-            if (!a) return null;
-            const expanded = expandedId === q.id;
+          <h2 className="font-bold text-stone-700">科目ごとの解答・解説</h2>
+          <p className="text-xs text-stone-400">
+            科目名を押すと、その科目の全問の解答・解説がまとめて表示されます（教科書の根拠・押さえるべきポイントは、
+            後で復習モードから見られるようここでは省略しています）。
+          </p>
+          {rows.map((r) => {
+            const list = questionsBySubject.get(r.subject) ?? [];
+            const expanded = expandedSubject === r.subject;
             return (
-              <div key={q.id} className="rounded-xl bg-white shadow-warm-sm">
+              <div key={r.subject} className="rounded-xl bg-white shadow-warm-sm">
                 <button
-                  onClick={() => {
-                    setExpandedId(expanded ? null : q.id);
-                    setExpandedCitation(null);
-                  }}
+                  onClick={() => setExpandedSubject(expanded ? null : r.subject)}
                   className="flex min-h-12 w-full items-center gap-3 p-3 text-left text-sm"
                 >
-                  <span className={a.isCorrect ? "text-green-600" : "text-red-600"}>{a.isCorrect ? "○" : "×"}</span>
-                  <span className="shrink-0 text-xs text-stone-400">
-                    {i + 1}. {q.subject}
+                  <span className={`font-medium ${r.accuracy >= 60 ? "text-green-600" : "text-red-600"}`}>
+                    {r.correct}/{r.total}
                   </span>
-                  <span className="line-clamp-1 flex-1">{q.stem}</span>
-                  <span className="shrink-0 text-xs text-stone-400">{expanded ? "閉じる ▲" : "解説 ▼"}</span>
+                  <span className="flex-1 font-medium text-stone-800">{r.subject}</span>
+                  <span className="shrink-0 text-xs text-stone-400">{expanded ? "閉じる ▲" : "詳細 ▼"}</span>
                 </button>
 
                 {expanded && (
-                  <div className="space-y-3 border-t border-stone-100 p-4 text-sm">
-                    {q.case_text && (
-                      <div className="rounded bg-stone-50 p-3 leading-relaxed">
-                        <span className="mr-1 font-bold">〔事例〕</span>
-                        {q.case_text}
-                      </div>
-                    )}
-                    <p className="font-medium leading-relaxed">{q.stem}</p>
-                    <ol className="space-y-2">
-                      {q.options.map((opt, oi) => {
-                        const n = oi + 1;
-                        const isAnswer = q.correct.includes(n);
-                        const chosen = a.selected.includes(n);
-                        let style = "border-stone-200 bg-white opacity-70";
-                        if (isAnswer) style = "border-green-500 bg-green-50";
-                        else if (chosen) style = "border-red-400 bg-red-50";
-                        return (
-                          <li key={n} className={`rounded-xl border p-3 leading-relaxed ${style}`}>
-                            <span className="mr-2 font-bold">{n}</span>
-                            {opt}
-                            {isAnswer && <span className="ml-2 text-green-600">✓ 正答</span>}
-                            {chosen && !isAnswer && <span className="ml-2 text-red-500">あなたの解答</span>}
-                          </li>
-                        );
-                      })}
-                    </ol>
-
-                    <div>
-                      <h3 className="mb-2 font-bold text-indigo-700">選択肢ごとの解説</h3>
-                      <ol className="space-y-2">
-                        {q.explanations.map((ex, ei) => (
-                          <li key={ei} className="flex gap-2 leading-relaxed">
-                            <span
-                              className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
-                                q.correct.includes(ei + 1) ? "bg-green-600 text-white" : "bg-stone-300 text-stone-700"
-                              }`}
-                            >
-                              {ei + 1}
-                            </span>
-                            <span>{ex}</span>
-                          </li>
-                        ))}
-                      </ol>
-                    </div>
-
-                    {q.key_points && (
-                      <div className="rounded-xl bg-amber-50 p-3">
-                        <h3 className="mb-1 font-bold text-amber-800">押さえておくべきポイント</h3>
-                        <p className="whitespace-pre-wrap leading-relaxed">{q.key_points}</p>
-                      </div>
-                    )}
-
-                    {q.citations && q.citations.length > 0 && (
-                      <div>
-                        <h3 className="mb-1 font-bold text-stone-700">教科書の根拠</h3>
-                        <ul className="space-y-2">
-                          {dedupeCitations(q.citations).map((c, ci) => {
-                            const citeExpanded = expandedCitation === ci;
+                  <div className="space-y-4 border-t border-stone-100 p-4 text-sm">
+                    {list.map(({ q, a }, i) => (
+                      <div key={q.id} className={i > 0 ? "border-t border-stone-100 pt-4" : ""}>
+                        <div className="mb-2 flex items-start gap-2">
+                          <span className={`shrink-0 font-bold ${a.isCorrect ? "text-green-600" : "text-red-600"}`}>
+                            {a.isCorrect ? "○" : "×"}
+                          </span>
+                          <div>
+                            {q.case_text && (
+                              <p className="mb-1 rounded bg-stone-50 p-2 leading-relaxed">
+                                <span className="mr-1 font-bold">〔事例〕</span>
+                                {q.case_text}
+                              </p>
+                            )}
+                            <p className="font-medium leading-relaxed">{q.stem}</p>
+                          </div>
+                        </div>
+                        <ol className="space-y-2">
+                          {q.options.map((opt, oi) => {
+                            const n = oi + 1;
+                            const isAnswer = q.correct.includes(n);
+                            const chosen = a.selected.includes(n);
+                            let style = "border-stone-200 bg-white opacity-70";
+                            if (isAnswer) style = "border-green-500 bg-green-50";
+                            else if (chosen) style = "border-red-400 bg-red-50";
                             return (
-                              <li key={ci} className="rounded-xl border border-stone-100">
-                                <button
-                                  onClick={() => setExpandedCitation(citeExpanded ? null : ci)}
-                                  className="flex min-h-10 w-full items-center gap-2 p-2 text-left text-stone-600"
-                                >
-                                  <span className="text-indigo-300">・</span>
-                                  <span className="flex-1">
-                                    {c.book} p.{c.page_start}
-                                    {c.page_end !== c.page_start ? `–${c.page_end}` : ""}
-                                  </span>
-                                  <span className="shrink-0 text-xs font-bold text-indigo-500">{citeExpanded ? "－" : "＋"}</span>
-                                </button>
-                                {citeExpanded && (
-                                  <p className="whitespace-pre-wrap border-t border-stone-100 p-3 leading-relaxed text-stone-600">
-                                    {c.excerpt}
-                                  </p>
-                                )}
+                              <li key={n} className={`rounded-xl border p-3 leading-relaxed ${style}`}>
+                                <span className="mr-2 font-bold">{n}</span>
+                                {opt}
+                                {isAnswer && <span className="ml-2 text-green-600">✓ 正答</span>}
+                                {chosen && !isAnswer && <span className="ml-2 text-red-500">あなたの解答</span>}
                               </li>
                             );
                           })}
-                        </ul>
+                        </ol>
+                        <ol className="mt-2 space-y-1.5">
+                          {q.explanations.map((ex, ei) => (
+                            <li key={ei} className="flex gap-2 leading-relaxed text-stone-600">
+                              <span
+                                className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                                  q.correct.includes(ei + 1) ? "bg-green-600 text-white" : "bg-stone-300 text-stone-700"
+                                }`}
+                              >
+                                {ei + 1}
+                              </span>
+                              <span>{ex}</span>
+                            </li>
+                          ))}
+                        </ol>
                       </div>
-                    )}
+                    ))}
                   </div>
                 )}
               </div>
