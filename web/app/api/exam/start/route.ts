@@ -66,6 +66,12 @@ export async function POST(req: NextRequest) {
     const { error: updateError } = await sb.from("exam_attempts").update(patch).eq("id", current.id);
     if (updateError) throw new Error(updateError.message);
 
+    // 消費した分（このパートぶんの出題）を即座に補充する（分野別演習の出題直後フックと
+    // 同じ考え方。日次cron任せだと最大1日ストックが目標を下回ったままになるため）。
+    after(() =>
+      topUpExamPool({ timeBudgetMs: TOPUP_HOOK_TIME_BUDGET_MS }).catch((e) => logError("exam-topup-hook", e)),
+    );
+
     return NextResponse.json({
       ready: true,
       examAttemptId: current.id,

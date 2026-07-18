@@ -3,7 +3,7 @@ import { generateOneQuestion } from "./generation";
 import { logError } from "./errorLog";
 import { listSubjects } from "./subjects";
 import type { Question } from "./types";
-import { EXAM_SUBJECT_COUNTS, EXAM_STOCK_SESSIONS_AHEAD } from "./examFormat";
+import { EXAM_SUBJECT_COUNTS, EXAM_STOCK_SESSIONS_AHEAD, ExamPart } from "./examFormat";
 
 // 累積アクティブ数がこれ未満の間は、ストック補充のたびに必ず新規生成する
 const FULL_GENERATION_UNTIL = 50;
@@ -335,17 +335,37 @@ export async function topUpExamPool(opts: { timeBudgetMs?: number } = {}): Promi
 }
 
 /** 管理者ページ表示用。実戦模試プールの科目ごとの在庫スナップショット（目標件数付き）。 */
-export async function getExamStockSnapshot(): Promise<(SubjectStock & { target: number })[]> {
+export async function getExamStockSnapshot(): Promise<(SubjectStock & { target: number; part: ExamPart })[]> {
   return Promise.all(
-    EXAM_SUBJECT_COUNTS.map(async ({ subject, questions }) => {
+    EXAM_SUBJECT_COUNTS.map(async ({ subject, part, questions }) => {
       const [active, total] = await Promise.all([
         countExamPoolActive(subject),
         countBySubject(subject, ["active", "rejected"], "exam"),
       ]);
       const target = questions * EXAM_STOCK_SESSIONS_AHEAD;
-      return { subject, unserved: active, active, total, target };
+      return { subject, unserved: active, active, total, target, part };
     }),
   );
+}
+
+/**
+ * 管理者ページ表示用。「今すぐ実戦模試を何回分開始できるか」をパートごとに返す。
+ * 各科目の在庫を本番出題数で割った回数のうち、そのパート内で最も少ない科目が
+ * ボトルネックになる（1科目でも本番出題数に届いていなければ、そのパートは0回扱い）。
+ */
+export async function getExamReadyRounds(): Promise<{ common: number; specialized: number }> {
+  const snapshot = await getExamStockSnapshot();
+  const readyRoundsByPart = (part: ExamPart): number => {
+    const subjects = snapshot.filter((s) => s.part === part);
+    if (subjects.length === 0) return 0;
+    return Math.min(
+      ...subjects.map((s) => {
+        const questions = EXAM_SUBJECT_COUNTS.find((c) => c.subject === s.subject)?.questions ?? 1;
+        return Math.floor(s.active / questions);
+      }),
+    );
+  };
+  return { common: readyRoundsByPart("common"), specialized: readyRoundsByPart("specialized") };
 }
 
 /**

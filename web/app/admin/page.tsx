@@ -28,6 +28,7 @@ export default function AdminPage() {
   const [usageCallCount, setUsageCallCount] = useState(0);
   const [stock, setStock] = useState<SubjectStock[]>([]);
   const [examPool, setExamPool] = useState<ExamSubjectStock[]>([]);
+  const [examReadyRounds, setExamReadyRounds] = useState<{ common: number; specialized: number } | null>(null);
   const [stockCheckedAt, setStockCheckedAt] = useState<string | null>(null);
   const [stockLoading, setStockLoading] = useState(false);
   const [resetUnservedConfirm, setResetUnservedConfirm] = useState(false);
@@ -67,6 +68,7 @@ export default function AdminPage() {
       .then((d) => {
         if (d.stock) setStock(d.stock);
         if (d.examPool) setExamPool(d.examPool);
+        if (d.examReadyRounds) setExamReadyRounds(d.examReadyRounds);
         if (d.checkedAt) setStockCheckedAt(d.checkedAt);
       })
       .finally(() => setStockLoading(false));
@@ -268,9 +270,14 @@ export default function AdminPage() {
           </button>
         </div>
         <p className="mt-1 text-sm text-slate-500">
-          実戦模試専用の未消費ストック（一度も出題していない問題）。目標は「本番出題数×5回分」で、
+          実戦模試専用の未消費ストック（一度も出題していない問題）。目標は「本番出題数×3回分」で、
           受験のたびに消費されて通常プールへ合流するため、常にこの目標値を保つよう裏側で補充されます。
         </p>
+        {examReadyRounds && (
+          <p className="mt-2 text-sm font-medium text-slate-700">
+            今すぐ受験できる回数: 午前 {examReadyRounds.common}回分 / 午後 {examReadyRounds.specialized}回分
+          </p>
+        )}
         {examPool.length === 0 ? (
           <p className="mt-3 text-sm text-slate-400">まだデータがありません。</p>
         ) : (

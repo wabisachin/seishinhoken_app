@@ -6,7 +6,6 @@ import type { Question } from "@/lib/types";
 import type { ExamPart } from "@/lib/examFormat";
 
 const PART_LABEL: Record<ExamPart, string> = { common: "午前の部（共通科目）", specialized: "午後の部（専門科目）" };
-const STORAGE_KEY = "exam_quiz_progress_v1";
 
 type ExamStatusValue = "not_started" | "in_progress" | "completed";
 type ExamState = {
@@ -19,27 +18,11 @@ type ExamState = {
 type Answer = { selected: number[]; isCorrect: boolean };
 type SubjectScore = { subject: string; correct: number; total: number };
 type Verdict = { passed: boolean; overallRate: number; totalCorrect: number; totalQuestions: number; failedGroups: string[] };
-// 結果詳細画面用。/api/exam/questionsはそのexam_attempt内での解答(yourAnswer)を
-// 埋め込んで返すため、クライアント側で別途answersを取り回す必要が無い
-// （午前・午後を別の日に受けても、両方の解答をサーバーから正しく取得できる）
+// /api/exam/questionsはそのexam_attempt内での解答(yourAnswer)を埋め込んで返すため、
+// 再開時の進捗（どこまで解答済みか）・残り時間はどちらもサーバー側の記録だけを正として
+// 復元する（localStorageには一切頼らない。別端末・ブラウザデータ消去後でも、途中離脱
+// した模試を必ず正しい位置・正しい残り時間から再開できるようにするため）
 type ExamQuestion = Question & { yourAnswer: Answer | null };
-
-type Progress = { examAttemptId: number; part: ExamPart; page: number; answers: Record<number, Answer> };
-function loadProgress(): Progress | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as Progress) : null;
-  } catch {
-    return null;
-  }
-}
-function saveProgress(p: Progress) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
-}
-function clearProgress() {
-  localStorage.removeItem(STORAGE_KEY);
-}
 
 function formatClock(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -116,27 +99,41 @@ export default function ExamQuiz() {
     const qRes = await fetch(`/api/exam/questions?examAttemptId=${attemptId}&part=${p}`);
     const qData = await qRes.json();
     if (qData.error) throw new Error(qData.error);
-    const qs = qData.questions as Question[];
+    const qs = qData.questions as ExamQuestion[];
     const order = [...new Set(qs.map((q) => q.subject))];
+
+    // 再開位置はサーバーに記録済みの解答(yourAnswer)から復元する。科目(ページ)ごとに
+    // 全問回答済みかどうかを見て、最初の未完了ページへ飛ぶ
+    const restoredAnswers: Record<number, Answer> = {};
+    for (const q of qs) {
+      if (q.yourAnswer) restoredAnswers[q.id] = q.yourAnswer;
+    }
+    let resumePage = order.length;
+    for (let i = 0; i < order.length; i++) {
+      const subjectQuestions = qs.filter((q) => q.subject === order[i]);
+      if (!subjectQuestions.every((q) => restoredAnswers[q.id])) {
+        resumePage = i;
+        break;
+      }
+    }
 
     const statusRes = await fetch(`/api/exam/status?examAttemptId=${attemptId}&part=${p}`);
     const statusData = await statusRes.json();
     const remaining = statusData.error ? (initialRemaining ?? 0) : statusData.remainingSeconds;
 
-    const progress = loadProgress();
-    const resumable = progress && progress.examAttemptId === attemptId && progress.part === p;
-
     setExamAttemptId(attemptId);
     setPart(p);
     setQuestions(qs);
     setSubjectOrder(order);
-    setAnswers(resumable ? progress!.answers : {});
-    setPage(resumable ? progress!.page : 0);
+    setAnswers(restoredAnswers);
+    setPage(Math.min(resumePage, Math.max(order.length - 1, 0)));
     setDraft({});
     setRemainingSeconds(remaining);
     finishingRef.current = false;
 
-    if (remaining <= 0) {
+    if (remaining <= 0 || resumePage >= order.length) {
+      // 時間切れ、または全問回答済みなのに完了処理が完了していない
+      // （提出直後に通信が切れた等）場合は、今すぐ完了させる
       await finishPart(attemptId, p);
       return;
     }
@@ -217,7 +214,6 @@ export default function ExamQuiz() {
       const nextPage = page + 1;
       setPage(nextPage);
       setDraft({});
-      saveProgress({ examAttemptId, part, page: nextPage, answers: nextAnswers });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -235,7 +231,6 @@ export default function ExamQuiz() {
       });
       const d = await res.json();
       if (d.error) throw new Error(d.error);
-      clearProgress();
       setFinishedPart(p);
       setPartResult({ bySubject: d.partResult.bySubject, correct: d.partResult.correct, total: d.partResult.total });
 
@@ -304,8 +299,8 @@ export default function ExamQuiz() {
         </div>
       );
     }
-    const commonLocked = state.hasInProgress && state.commonStatus === "completed";
-    const specializedLocked = state.hasInProgress && state.specializedStatus === "completed";
+    const statusOf = (p: ExamPart): ExamStatusValue =>
+      (p === "common" ? state.commonStatus : state.specializedStatus) ?? "not_started";
     return (
       <div className="space-y-4">
         <h1 className="text-xl font-bold">実戦模試</h1>
@@ -315,7 +310,9 @@ export default function ExamQuiz() {
         </p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {(["common", "specialized"] as ExamPart[]).map((p) => {
-            const locked = p === "common" ? commonLocked : specializedLocked;
+            const status = statusOf(p);
+            const locked = status === "completed";
+            const label = locked ? "この回では受験済みです" : status === "in_progress" ? "続きから再開する" : "タップして開始";
             return (
               <button
                 key={p}
@@ -328,7 +325,7 @@ export default function ExamQuiz() {
                 }`}
               >
                 <h2 className="font-bold text-indigo-700">{PART_LABEL[p]}</h2>
-                <p className="mt-1 text-sm text-stone-600">{locked ? "この回では受験済みです" : "タップして開始"}</p>
+                <p className="mt-1 text-sm text-stone-600">{label}</p>
               </button>
             );
           })}
