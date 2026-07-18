@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import { generateOneQuestion } from "./generation";
+import { generateOneQuestion, CaseAxis } from "./generation";
 import { logError } from "./errorLog";
 import { listSubjects } from "./subjects";
 import type { Question } from "./types";
@@ -17,7 +17,7 @@ const QUESTION_COLS =
   "id, subject, taxonomy_id, question_type, stem, case_text, options, correct, explanations, key_points, citations";
 
 // pool='general'（通常プール）に限定するのが既定。'exam'ストック関連の関数だけが
-// 明示的に'exam'を渡す。こうしないと実戦模試専用の未消費問題が分野別演習・
+// 明示的に'exam'を渡す。こうしないと実戦模試専用の未消費問題が科目別演習・
 // ミニ模試に混入してしまう。
 async function countBySubject(subject: string, statuses: string[], pool: "general" | "exam" = "general"): Promise<number> {
   const { count } = await supabase()
@@ -29,14 +29,18 @@ async function countBySubject(subject: string, statuses: string[], pool: "genera
   return count ?? 0;
 }
 
-async function fetchUnseenActive(subject: string, excludeIds: number[]): Promise<Question | null> {
+async function fetchUnseenActive(subject: string, excludeIds: number[], caseAxis?: CaseAxis): Promise<Question | null> {
   let query = supabase()
     .from("questions")
     .select(QUESTION_COLS)
     .eq("subject", subject)
     .eq("status", "active")
-    .eq("pool", "general")
-    .limit(1);
+    .eq("pool", "general");
+  // caseAxisを指定すると、case_textの有無で「事例問題のみ／事例なし」に絞り込む
+  // （科目別演習の出題形式フィルタ用。未指定なら従来通り全形式を対象にする）
+  if (caseAxis === "case") query = query.not("case_text", "is", null);
+  if (caseAxis === "nocase") query = query.is("case_text", null);
+  query = query.limit(1);
   if (excludeIds.length > 0) query = query.not("id", "in", `(${excludeIds.join(",")})`);
   const { data, error } = await query;
   if (error) throw new Error(error.message);
@@ -51,13 +55,16 @@ async function fetchUnseenActive(subject: string, excludeIds: number[]): Promise
  * null になるのは、その科目にactiveな問題が1問も無い場合のみ
  * （＝本当の意味での「出題できる問題が無い」状態）。
  */
-async function fetchLeastAttempted(subject: string): Promise<Question | null> {
-  const { data: active } = await supabase()
+async function fetchLeastAttempted(subject: string, caseAxis?: CaseAxis): Promise<Question | null> {
+  let query = supabase()
     .from("questions")
     .select(QUESTION_COLS)
     .eq("subject", subject)
     .eq("status", "active")
     .eq("pool", "general");
+  if (caseAxis === "case") query = query.not("case_text", "is", null);
+  if (caseAxis === "nocase") query = query.is("case_text", null);
+  const { data: active } = await query;
   const rows = (active ?? []) as Question[];
   if (rows.length === 0) return null;
 
@@ -89,13 +96,16 @@ const TOPUP_BATCH_CAP = 10;
  * activeなquestions行数は出題されても減らない（消費されない）ため、それとは別の指標として
  * 見る必要がある。これが「今すぐ出せる在庫」の実態に対応する。
  */
-async function countUnservedActive(subject: string): Promise<number> {
-  const { data: active } = await supabase()
+async function countUnservedActive(subject: string, caseAxis?: CaseAxis): Promise<number> {
+  let query = supabase()
     .from("questions")
     .select("id")
     .eq("subject", subject)
     .eq("status", "active")
     .eq("pool", "general");
+  if (caseAxis === "case") query = query.not("case_text", "is", null);
+  if (caseAxis === "nocase") query = query.is("case_text", null);
+  const { data: active } = await query;
   const ids = (active ?? []).map((r) => r.id as number);
   if (ids.length === 0) return 0;
   const { data: attempted } = await supabase()
@@ -108,7 +118,7 @@ async function countUnservedActive(subject: string): Promise<number> {
 }
 
 // 同じ科目に対するtopUpSubjectの多重起動を防ぐガード（同一インスタンス内のみ有効な
-// ベストエフォート。分野別演習は出題のたびにこの関数を呼ぶため、セッション開始直後の
+// ベストエフォート。科目別演習は出題のたびにこの関数を呼ぶため、セッション開始直後の
 // 先読みチェーンが同じ科目に対して短時間に何度も呼ぶバーストを潰す目的。インスタンスを
 // またぐ多重実行が万一起きても、下の科目上限（SUBJECT_TARGET/HARD_CAP_TOTAL）は
 // DBの行数を直接数えて判定するため、コストが際限なく増えることはない）
@@ -283,6 +293,86 @@ export async function getStockSnapshot(): Promise<SubjectStock[]> {
   );
 }
 
+// 科目別演習の「出題形式フィルタ（事例問題のみ／事例なし）」用に、科目ごと・枠組み軸
+// ごとに常時確保しておく未出題ストックの目標値。通常のSTOCK_TARGET（形式を問わない
+// 合計5問）とは別に、フィルタ利用時にすぐ枯渇しないよう各軸5問ずつを別枠で確保する。
+const AXIS_STOCK_TARGET = 5;
+const CASE_AXES: CaseAxis[] = ["case", "nocase"];
+
+// topUpSubjectと同じ「同一プロセス内での多重起動防止」ガード。キーは`${subject}:${axis}`。
+const axisTopUpInFlight = new Set<string>();
+
+/**
+ * 指定科目について、事例あり／事例なしそれぞれの未出題ストックがAXIS_STOCK_TARGET未満なら
+ * generateOneQuestion(subject, { forceCaseAxis })で狙い撃ちで埋める。科目によっては
+ * 実績比率上どちらかの軸がほぼ出ない（例:「精神医学と精神医療」はcase比率がほぼ0%）ため、
+ * 通常のtopUpSubject（形式を問わない確率抽選）任せではこの軸のストックがいつまでも
+ * 貯まらない。そのため専用に軸を固定して生成する。50/200テーパーの上限
+ * （HARD_CAP_TOTAL/SUBJECT_TARGET）はtopUpSubjectと共有する。
+ */
+export async function topUpCaseAxisStock(
+  subject: string,
+  opts: { timeBudgetMs?: number } = {},
+): Promise<{ generated: number }> {
+  const { timeBudgetMs = Infinity } = opts;
+  const start = Date.now();
+  let generated = 0;
+  for (const axis of CASE_AXES) {
+    if (Date.now() - start >= timeBudgetMs) break;
+    const key = `${subject}:${axis}`;
+    if (axisTopUpInFlight.has(key)) continue;
+    axisTopUpInFlight.add(key);
+    try {
+      let unserved = await countUnservedActive(subject, axis);
+      while (unserved < AXIS_STOCK_TARGET && Date.now() - start < timeBudgetMs) {
+        const totalCount = await countBySubject(subject, ["active", "rejected"]);
+        const activeCount = await countBySubject(subject, ["active"]);
+        if (totalCount >= HARD_CAP_TOTAL || activeCount >= SUBJECT_TARGET) break;
+        try {
+          const result = await generateOneQuestion(subject, { forceCaseAxis: axis });
+          generated++;
+          if (result.status === "active") {
+            unserved++;
+          } else {
+            await logError("generation-rejected", new Error("出題形式別ストック補充の問題が却下されました"), {
+              subject,
+              axis,
+              topic: result.topic,
+              problems: result.problems,
+            });
+          }
+        } catch (e) {
+          await logError("axis-topup", e, { subject, axis });
+          break;
+        }
+      }
+    } finally {
+      axisTopUpInFlight.delete(key);
+    }
+  }
+  return { generated };
+}
+
+/** 全科目分の出題形式別ストックをまとめて補充する（Cronから呼ぶ）。時間予算は科目数で均等割りする。 */
+export async function topUpCaseAxisAllSubjects(opts: { timeBudgetMs?: number } = {}): Promise<{ results: Record<string, number> }> {
+  const { timeBudgetMs = Infinity } = opts;
+  const start = Date.now();
+  const subjects = await listSubjects();
+  const results: Record<string, number> = {};
+  for (const subject of subjects) {
+    const remainingMs = timeBudgetMs - (Date.now() - start);
+    if (remainingMs <= 0) break;
+    try {
+      const { generated } = await topUpCaseAxisStock(subject, { timeBudgetMs: remainingMs });
+      results[subject] = generated;
+    } catch (e) {
+      await logError("axis-topup-all", e, { subject });
+      results[subject] = -1;
+    }
+  }
+  return { results };
+}
+
 // 実戦模試専用の未消費ストック（pool='exam', status='active'）の科目ごとの件数。
 async function countExamPoolActive(subject: string): Promise<number> {
   return countBySubject(subject, ["active"], "exam");
@@ -400,7 +490,7 @@ export type NextQuestionResult = {
 };
 
 /**
- * 分野別演習の「次の1問」を返す。
+ * 科目別演習の「次の1問」を返す。
  *
  * 設計方針（コスト安全性が最優先）:
  * - バックグラウンドで生成し続けるループは持たない。生成は必ずこの関数の
@@ -409,18 +499,25 @@ export type NextQuestionResult = {
  *   一切持たない）。プロセス再起動やリクエストの再送があっても、上限そのものが
  *   リセットされたり回避されたりすることは無い。
  * - 却下(rejected)も上限の分母に含めるため、却下が続く科目でも必ず生成が止まる。
+ *
+ * caseAxisを指定すると、科目別演習の「事例問題のみ／事例なし」フィルタに従って
+ * 出題・生成の両方を絞り込む（未指定なら従来通り全形式が対象）。
  */
-export async function getOrGenerateNext(subject: string, excludeIds: number[]): Promise<NextQuestionResult> {
-  const existing = await fetchUnseenActive(subject, excludeIds);
+export async function getOrGenerateNext(
+  subject: string,
+  excludeIds: number[],
+  caseAxis?: CaseAxis,
+): Promise<NextQuestionResult> {
+  const existing = await fetchUnseenActive(subject, excludeIds, caseAxis);
 
   const activeCount = await countBySubject(subject, ["active"]);
   const totalCount = await countBySubject(subject, ["active", "rejected"]);
   const canGenerate = totalCount < HARD_CAP_TOTAL && activeCount < SUBJECT_TARGET;
 
-  // かんばん方式のストック（topUpSubject、cron + /api/quiz/nextの出題直後フック）が
-  // 常時ストックを補充しているため、ここ（ユーザーへの出題そのもの）では既存の未出題
-  // 問題があれば必ずそれを即座に返す。その場ライブ生成（ユーザーを待たせる）は、
-  // 本当にストックが尽きている場合の最終手段としてのみ行う。
+  // かんばん方式のストック（topUpSubject/topUpCaseAxisStock、cron + /api/quiz/nextの
+  // 出題直後フック）が常時ストックを補充しているため、ここ（ユーザーへの出題そのもの）
+  // では既存の未出題問題があれば必ずそれを即座に返す。その場ライブ生成（ユーザーを
+  // 待たせる）は、本当にストックが尽きている場合の最終手段としてのみ行う。
   const shouldGenerate = canGenerate && !existing;
 
   if (!shouldGenerate) {
@@ -428,7 +525,7 @@ export async function getOrGenerateNext(subject: string, excludeIds: number[]): 
     // 今回のセッションで未出題の問題は無いが、新規も生成しない（上限 or 確率で見送り）場合。
     // 「上限に達したら新規が出ないだけで既出の問題が出る」という仕様を守るため、
     // セッション内の除外を無視してプールから再出題する。nullになるのはactiveが1問も無い時だけ。
-    const repeat = await fetchLeastAttempted(subject);
+    const repeat = await fetchLeastAttempted(subject, caseAxis);
     return { question: repeat, exhausted: !repeat };
   }
 
@@ -438,7 +535,7 @@ export async function getOrGenerateNext(subject: string, excludeIds: number[]): 
   // 管理画面や開発者が原因を追えるよう、伝播させる前にログとして残しておく。
   let result;
   try {
-    result = await generateOneQuestion(subject);
+    result = await generateOneQuestion(subject, caseAxis ? { forceCaseAxis: caseAxis } : {});
   } catch (e) {
     await logError("generation", e, { subject });
     throw e;
@@ -448,13 +545,13 @@ export async function getOrGenerateNext(subject: string, excludeIds: number[]): 
     if (fresh) return { question: fresh, exhausted: false };
   }
   // 却下された場合は、代わりに出せる既存問題があればそれを返す
-  const unseenFallback = existing ?? (await fetchUnseenActive(subject, excludeIds));
+  const unseenFallback = existing ?? (await fetchUnseenActive(subject, excludeIds, caseAxis));
   const stillCanGenerate = (await countBySubject(subject, ["active", "rejected"])) < HARD_CAP_TOTAL;
   if (unseenFallback || stillCanGenerate) {
     // まだ試行の余地がある（クライアントがリトライすれば良い）ので、ここではexhausted扱いにしない
     return { question: unseenFallback, exhausted: false };
   }
   // これ以上生成もできず、未出題の問題も無い。それでも既出のactiveが1問でもあれば再出題する
-  const repeat = await fetchLeastAttempted(subject);
+  const repeat = await fetchLeastAttempted(subject, caseAxis);
   return { question: repeat, exhausted: !repeat };
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { isAdminRequest, checkPassword } from "@/lib/adminAuth";
-import { resetUnservedQuestions, topUpAllSubjects, topUpExamPool } from "@/lib/questionSupply";
+import { resetUnservedQuestions, topUpAllSubjects, topUpExamPool, topUpCaseAxisAllSubjects } from "@/lib/questionSupply";
 import { logError } from "@/lib/errorLog";
 
 // 削除後の全科目再生成をafter()側で走らせるため、この関数のタイムアウトを延ばしておく
@@ -25,10 +25,15 @@ export async function POST(req: NextRequest) {
     }
     const { deleted } = await resetUnservedQuestions();
     // resetUnservedQuestionsは通常プール・実戦模試プールの両方から未出題分を削除するため、
-    // 再構築も両方行う
+    // 再構築も両方行う（出題形式別ストックも同じ未出題分に含まれるため合わせて再構築する）
     after(() => topUpAllSubjects().catch((e) => logError("reset-unserved-topup", e)));
     after(() =>
       topUpExamPool({ timeBudgetMs: RESET_TOPUP_TIME_BUDGET_MS }).catch((e) => logError("reset-unserved-exam-topup", e)),
+    );
+    after(() =>
+      topUpCaseAxisAllSubjects({ timeBudgetMs: RESET_TOPUP_TIME_BUDGET_MS }).catch((e) =>
+        logError("reset-unserved-axis-topup", e),
+      ),
     );
     return NextResponse.json({ ok: true, deleted });
   } catch (e) {

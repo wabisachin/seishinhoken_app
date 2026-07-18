@@ -35,15 +35,22 @@ const DEFAULT_SESSION_COUNT = 5;
 const MAX_SESSION_COUNT = 10;
 
 // 復習モードは新規生成を一切行わない（既存問題の読み出しのみ）ため、
-// 分野別演習のコスト上限用カウント(count状態)とは無関係に、独自の出題数を使う。
+// 科目別演習のコスト上限用カウント(count状態)とは無関係に、独自の出題数を使う。
 const REVIEW_COUNT = 10;
 
-// 分野別演習の途中経過をlocalStorageに保存し、リロード/離脱後に再開できるようにする
+// 科目別演習の途中経過をlocalStorageに保存し、リロード/離脱後に再開できるようにする
 const SUBJECT_SESSION_KEY = "quiz_session_subject_v1";
+
+// 科目別演習の出題形式フィルタ。「事例問題のみ／事例なし」は過去問分析で判明した
+// 枠組み軸（case/nocase）そのもの（lib/generation.tsのCaseAxis）。用語選択/知識説明の
+// 課題軸まで絞ると科目によってはストックが薄くなりすぎるため、フィルタとして
+// ユーザーに見せるのは事例の有無の1軸だけにしている。
+type CaseFilter = "all" | "case" | "nocase";
 
 type PersistedSubjectSession = {
   subject: string;
   count: number;
+  caseFilter: CaseFilter;
   questions: Question[];
   records: { questionId: number; selected: number[]; isCorrect: boolean }[];
   index: number;
@@ -69,11 +76,12 @@ function clearSubjectSession() {
 async function requestNextQuestion(
   subject: string,
   excludeIds: number[],
+  caseFilter: CaseFilter,
 ): Promise<{ question: Question | null; exhausted: boolean }> {
   const res = await fetch("/api/quiz/next", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ subject, excludeIds }),
+    body: JSON.stringify({ subject, excludeIds, caseAxis: caseFilter === "all" ? undefined : caseFilter }),
   });
   const d = await res.json();
   if (d.error) throw new Error(d.error);
@@ -89,6 +97,7 @@ function QuizInner({ mode }: { mode: Mode }) {
   const [subjects, setSubjects] = useState<{ subject: string; taxonomy_items: number; kind: string | null }[]>([]);
   const [subject, setSubject] = useState("");
   const [count, setCount] = useState(DEFAULT_SESSION_COUNT);
+  const [caseFilter, setCaseFilter] = useState<CaseFilter>("all");
   const [countInput, setCountInput] = useState(String(DEFAULT_SESSION_COUNT));
   const [countError, setCountError] = useState<string | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -162,6 +171,7 @@ function QuizInner({ mode }: { mode: Mode }) {
       .filter((r): r is AnswerRecord => r !== null);
     setSubject(pendingResume.subject);
     setCount(pendingResume.count);
+    setCaseFilter(pendingResume.caseFilter ?? "all");
     setCountInput(String(pendingResume.count));
     setQuestions(pendingResume.questions);
     setIndex(pendingResume.index);
@@ -194,10 +204,10 @@ function QuizInner({ mode }: { mode: Mode }) {
   const waitForNextSubjectQuestion = useCallback(
     async (excludeIds: number[]) => {
       for (let attempt = 0; attempt < MAX_NEXT_ATTEMPTS && !cancelledRef.current; attempt++) {
-        const { question, exhausted } = await requestNextQuestion(subject, excludeIds);
+        const { question, exhausted } = await requestNextQuestion(subject, excludeIds, caseFilter);
         if (question) return question;
         if (exhausted) {
-          throw new Error("この科目はこれ以上出題できる問題がありません（上限に達しました）。");
+          throw new Error("この科目・出題形式ではこれ以上出題できる問題がありません（上限に達しました）。");
         }
         setPhase("generating");
         setGeneratingAttempt(attempt + 1);
@@ -206,7 +216,7 @@ function QuizInner({ mode }: { mode: Mode }) {
         "問題の生成に時間がかかりすぎています。この分野は教科書の記述から出題を作りにくく、生成のやり直しが続いている可能性があります。時間をおいて再度お試しください。",
       );
     },
-    [subject],
+    [subject, caseFilter],
   );
 
   // 却下等で取得できなかった場合だけ、フォアグラウンドと同じ回数だけ静かにリトライする
@@ -214,12 +224,12 @@ function QuizInner({ mode }: { mode: Mode }) {
   const silentlyFetchOne = useCallback(
     async (excludeIds: number[]) => {
       for (let attempt = 0; attempt < MAX_NEXT_ATTEMPTS && !cancelledRef.current; attempt++) {
-        const result = await requestNextQuestion(subject, excludeIds).catch(() => ({ question: null, exhausted: false }));
+        const result = await requestNextQuestion(subject, excludeIds, caseFilter).catch(() => ({ question: null, exhausted: false }));
         if (result.question || result.exhausted) return result;
       }
       return { question: null, exhausted: false };
     },
-    [subject],
+    [subject, caseFilter],
   );
 
   // セッション開始直後から、残りの問題を裏で連続的に先読みする。1問ずつ順番に
@@ -261,7 +271,7 @@ function QuizInner({ mode }: { mode: Mode }) {
         setQuestions([first]);
         setIndex(0);
         setPhase("answering");
-        saveSubjectSession({ subject, count, questions: [first], records: [], index: 0, savedAt: Date.now() });
+        saveSubjectSession({ subject, count, caseFilter, questions: [first], records: [], index: 0, savedAt: Date.now() });
         void runSubjectPrefetchChain([first.id], count, 1);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -287,7 +297,7 @@ function QuizInner({ mode }: { mode: Mode }) {
     setQuestions(d.questions);
     setIndex(0);
     setPhase("answering");
-  }, [mode, subject, count, waitForNextSubjectQuestion]);
+  }, [mode, subject, count, caseFilter, waitForNextSubjectQuestion]);
 
   const q = questions[index];
   const maxSelect = q?.question_type === "multi" ? 2 : 1;
@@ -319,6 +329,7 @@ function QuizInner({ mode }: { mode: Mode }) {
       saveSubjectSession({
         subject,
         count,
+        caseFilter,
         questions,
         records: nextRecords.map((r) => ({ questionId: r.question.id, selected: r.selected, isCorrect: r.isCorrect })),
         index,
@@ -359,6 +370,7 @@ function QuizInner({ mode }: { mode: Mode }) {
         saveSubjectSession({
           subject,
           count,
+          caseFilter,
           questions: nextQuestions,
           records: records.map((r) => ({ questionId: r.question.id, selected: r.selected, isCorrect: r.isCorrect })),
           index: index + 1,
@@ -389,7 +401,7 @@ function QuizInner({ mode }: { mode: Mode }) {
   if (phase === "resume-prompt" && pendingResume) {
     return (
       <div className="space-y-4">
-        <h1 className="text-xl font-bold">分野別演習</h1>
+        <h1 className="text-xl font-bold">科目別演習</h1>
         <div className="rounded-2xl bg-amber-50 p-5 shadow-warm">
           <p className="text-sm text-amber-800">
             前回途中だった演習があります（{pendingResume.subject}: {pendingResume.records.length} / {pendingResume.count} 問まで解答済み）。続きから再開しますか？
@@ -417,7 +429,7 @@ function QuizInner({ mode }: { mode: Mode }) {
   if (phase === "setup") {
     return (
       <div className="space-y-4">
-        <h1 className="text-xl font-bold">{mode === "subject" ? "分野別演習" : "復習モード"}</h1>
+        <h1 className="text-xl font-bold">{mode === "subject" ? "科目別演習" : "復習モード"}</h1>
         {error && <p className="rounded bg-amber-100 p-3 text-sm text-amber-800">{error}</p>}
         {mode === "subject" && (
           <div className="rounded-2xl bg-white p-5 shadow-warm">
@@ -481,6 +493,32 @@ function QuizInner({ mode }: { mode: Mode }) {
                 一度に生成される問題数を抑えるため、1セッションあたり最大{MAX_SESSION_COUNT}問までです。
               </p>
             )}
+            <label className="mt-4 block text-sm font-medium">出題形式（任意）</label>
+            <div className="mt-1 grid grid-cols-3 gap-2">
+              {(
+                [
+                  { value: "all", label: "すべて" },
+                  { value: "case", label: "事例問題のみ" },
+                  { value: "nocase", label: "事例なし" },
+                ] as { value: CaseFilter; label: string }[]
+              ).map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setCaseFilter(opt.value)}
+                  className={`min-h-11 rounded-xl border px-2 py-2 text-xs font-medium transition-colors sm:text-sm ${
+                    caseFilter === opt.value
+                      ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                      : "border-stone-300 bg-white text-stone-600 hover:bg-stone-50"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-xs text-stone-400">
+              「事例問題」は、事例文を読んで対応・該当する概念などを答える形式です。
+            </p>
             <div className="mt-4">
               <button
                 onClick={start}

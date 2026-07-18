@@ -8,7 +8,7 @@ import { getStoredProfile } from "@/lib/profile";
 const PAGE_SIZE = 3;
 const STORAGE_KEY = "quiz_session_mock_v1";
 // 1科目ぶん(PAGE_SIZE問)を集めるための、1問あたりの生成リトライ上限
-// （分野別演習と同じ /api/quiz/next を使っており、却下が続く場合の保険も同じ考え方）
+// （科目別演習と同じ /api/quiz/next を使っており、却下が続く場合の保険も同じ考え方）
 const MAX_NEXT_ATTEMPTS = 15;
 
 // 本番の試験は午前(共通科目・社会福祉士と合同)/午後(専門科目・精神保健福祉士のみ)の
@@ -61,7 +61,7 @@ async function requestNextQuestion(
 }
 
 /**
- * 全分野ミニ模試も分野別演習と全く同じロジック（questionSupply.ts の
+ * 全分野ミニ模試も科目別演習と全く同じロジック（questionSupply.ts の
  * getOrGenerateNext）で1科目ぶんを揃える。過去に貯まった問題を並べるのではなく、
  * その科目のアクティブ問題数に応じて「50問まで毎回新規／200問到達で新規停止」の
  * 同じ確率で新規生成するかどうかが決まる。1ページ=1科目のPAGE_SIZE問を、
@@ -206,7 +206,7 @@ export default function MockQuiz() {
         setGeneratingAttempt(n);
       });
       if (first.length === 0) {
-        setError("問題プールが空です。分野別演習で問題を生成してから試してください。");
+        setError("問題プールが空です。科目別演習で問題を生成してから試してください。");
         setPhase("empty");
         return;
       }

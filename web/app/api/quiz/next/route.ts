@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse, after } from "next/server";
-import { getOrGenerateNext, topUpSubject } from "@/lib/questionSupply";
+import { getOrGenerateNext, topUpSubject, topUpCaseAxisStock } from "@/lib/questionSupply";
+import type { CaseAxis } from "@/lib/generation";
 import { logError } from "@/lib/errorLog";
 
 // 出題直後フックのtopUpSubject（after()内）は、このmaxDurationを超えると強制終了され、
@@ -16,7 +17,7 @@ export const maxDuration = 300;
 const TOPUP_HOOK_TIME_BUDGET_MS = 270_000;
 
 /**
- * 分野別演習の「次の1問」を返す。無ければ高々1回だけその場で生成を試みる
+ * 科目別演習の「次の1問」を返す。無ければ高々1回だけその場で生成を試みる
  * （リクエスト駆動・バックグラウンドループ無し。詳細はlib/questionSupply.ts参照）。
  */
 export async function POST(req: NextRequest) {
@@ -25,7 +26,8 @@ export async function POST(req: NextRequest) {
     const subject: string | undefined = body.subject;
     if (!subject) return NextResponse.json({ error: "subject is required" }, { status: 400 });
     const excludeIds: number[] = Array.isArray(body.excludeIds) ? body.excludeIds : [];
-    const result = await getOrGenerateNext(subject, excludeIds);
+    const caseAxis: CaseAxis | undefined = body.caseAxis === "case" || body.caseAxis === "nocase" ? body.caseAxis : undefined;
+    const result = await getOrGenerateNext(subject, excludeIds, caseAxis);
 
     // ストックの「消費」は回答送信時ではなく、問題が画面に出される（＝取り出される）
     // このタイミングで起きたとみなす。after()はレスポンス返却後に実行されるため、
@@ -34,6 +36,11 @@ export async function POST(req: NextRequest) {
       after(() =>
         topUpSubject(subject, { timeBudgetMs: TOPUP_HOOK_TIME_BUDGET_MS }).catch((e) =>
           logError("quiz-next-topup", e, { subject }),
+        ),
+      );
+      after(() =>
+        topUpCaseAxisStock(subject, { timeBudgetMs: TOPUP_HOOK_TIME_BUDGET_MS }).catch((e) =>
+          logError("quiz-next-axis-topup", e, { subject }),
         ),
       );
     }

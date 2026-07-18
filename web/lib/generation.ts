@@ -121,29 +121,42 @@ async function existingCoverage(taxonomyId: number, limit = 15) {
 }
 
 /**
- * 過去問(18科目・2回分264問を全件精査)を分析した結果の出題形式3分類。
- * - desc: 事象・概念・制度・理論等を、文単位の説明文の正誤で問う知識説明形式
- * - case: 「A精神保健福祉士」「Aさん」等の匿名の専門職・クライエントを主人公にした
- *   短い場面を設定し、その場面における適切な認識・対応等を問う事例形式（全体では
- *   約24%を占めるにもかかわらず、放置するとLLMがほぼ生成しない形式）
- * - term: 用語・名称そのものを選ばせる形式。「正しい用語はどれか」のようにstemが
- *   明示することは稀（264問中2問だけ）で、実際の大半は「〜として、正しいものを
- *   1つ選びなさい」という定型文のまま、選択肢が完全な説明文ではなく短い固有名詞・
- *   専門用語（病名・制度名・役職名・数値等）そのものになっている形。stemの文字列
- *   一致だけで判定すると1%未満に見えるが、選択肢の平均文字数まで見ると実際には
- *   全体の約18%を占める（医学概論・精神医学と精神医療等の科目に偏って多く、
- *   社会学と社会システム・社会保障等の政策・対人援助系科目にはほぼ出ない）。
- *   まれに（264問中2問、医学概論に集中）「用語とその属性（時期・分類等）の
- *   組み合わせとして正しいものを1つ選ぶ」ペア形式も見られたため、term形式の
- *   指示（FORMAT_INSTRUCTION.term）にはこのバリエーションも含めている
- *   （サンプルが少なく単独の重み付きカテゴリにするほどの精度は無いため）。
+ * 過去問(18科目・2回分264問を全件精査)を分析した結果の出題形式分類。
+ * 当初は「知識説明(desc)／事例(case)／用語選択(term)」の3値enumとして実装していたが、
+ * 事例文の有無で先に振り分けてしまうと、事例形式の中の用語選択（例: 場面を読んで
+ * 該当する診断名・入院形態・自助グループ名を選ばせる）を判定する機会が失われ、
+ * 実データの15.5%を占めるこの組み合わせが恒久的に生成不能になっていた
+ * （264問全数の再精査で判明）。実際には次の2軸が独立しており、2×2で漏れなく分類できる:
+ * - 枠組み軸 case/nocase: 「A精神保健福祉士」「Aさん」等の匿名の専門職・クライエントを
+ *   主人公にした短い場面（case_text）があるかどうか
+ * - 課題軸 term/desc: 選択肢が短い用語・固有名詞（病名・制度名・役職名・数値等）の
+ *   羅列(term)か、完全な説明文(desc)か
  *
- * 科目によってcase・termの出やすさに大きな差がある（例: 「ソーシャルワークの理論と
- * 方法」は事例形式が過去2回で18問中11問=61%、「精神医学と精神医療」は用語形式が
- * 79%を占める一方、他方はほぼ0%）ため、固定比率ではなく科目ごとの実績から動的に
- * 算出する（下記computeFormatWeights）。
+ * 264問中の実績比率（正答が判明している132問だけでなく全264問を対象、事例の有無・
+ * 選択肢形状は正答表が無くても判定できるため）:
+ *   nocase-desc 53.0% / nocase-term 15.9% / case-desc 15.5% / case-term 15.5%
+ * この4分類で264問全てが過不足なく分類され、5つ目のカテゴリ（複数軸の組み合わせ問題等）
+ * は実データに存在しなかった。
+ *
+ * term側の判定について: 「正しい用語はどれか」のようにstemが明示することは稀（264問中
+ * 2問だけ）で、実際の大半は「〜として、正しいものを1つ選びなさい」という定型文のまま、
+ * 選択肢が完全な説明文ではなく短い固有名詞・専門用語そのものになっている形。
+ * まれに（264問中2問、医学概論に集中）「用語とその属性（時期・分類等）の組み合わせと
+ * して正しいものを1つ選ぶ」ペア形式も見られたため、term系の指示にはこのバリエーションも
+ * 含めている（サンプルが少なく単独の重み付きカテゴリにするほどの精度は無いため）。
+ *
+ * 科目によって各セルの出やすさに大きな差がある（例: 「ソーシャルワークの理論と方法」は
+ * 事例形式が過去2回で18問中11問=61%、「精神医学と精神医療」は用語形式が79%を占める
+ * 一方、他方はほぼ0%）ため、固定比率ではなく科目ごとの実績から動的に算出する
+ * （下記computeFormatWeights）。
  */
-type QFormat = "case" | "term" | "desc";
+export type CaseAxis = "case" | "nocase";
+type TaskAxis = "desc" | "term";
+type QFormat = `${CaseAxis}-${TaskAxis}`;
+
+function classifyCaseAxis(caseText: string | null, combined: string): CaseAxis {
+  return (caseText && caseText.trim().length > 0) || /[A-Za-zＡ-Ｚ]\s*さん/.test(combined) ? "case" : "nocase";
+}
 
 // 選択肢の過半数が文末記号（。/．、または「である/する/できる/となる」等の述語＋句点）で
 // 終わっていなければ、文単位の説明文ではなく短い用語・固有名詞の羅列（用語選択形式）とみなす。
@@ -151,9 +164,7 @@ type QFormat = "case" | "term" | "desc";
 // 用語を「知識説明形式」に誤判定するケースが多く見つかった（例:「ウィンストン・チャーチル」
 // のような人名の並び、長い法律用語の羅列は文字数だけなら20字を超えるが述語を伴わない）。
 // 述語の有無という構造で判定する方が実態に近い。
-function classifyFormat(stem: string, caseText: string | null, options: string[]): QFormat {
-  const combined = `${stem} ${caseText ?? ""}`;
-  if ((caseText && caseText.trim().length > 0) || /[A-Za-zＡ-Ｚ]\s*さん/.test(combined)) return "case";
+function classifyTaskAxis(stem: string, options: string[]): TaskAxis {
   if (stem.includes("用語")) return "term";
   if (options.length === 0) return "desc";
   const sentenceLikeCount = options.filter((o) => /[。．]\s*$/.test(o.trim())).length;
@@ -161,7 +172,12 @@ function classifyFormat(stem: string, caseText: string | null, options: string[]
   return "desc";
 }
 
-const QFORMATS: QFormat[] = ["desc", "case", "term"];
+function classifyFormat(stem: string, caseText: string | null, options: string[]): QFormat {
+  const combined = `${stem} ${caseText ?? ""}`;
+  return `${classifyCaseAxis(caseText, combined)}-${classifyTaskAxis(stem, options)}`;
+}
+
+const QFORMATS: QFormat[] = ["nocase-desc", "nocase-term", "case-desc", "case-term"];
 
 /**
  * 科目ごとの出題形式の実績比率を算出する。その科目のサンプルが少ない/偏っている
@@ -171,8 +187,8 @@ const QFORMATS: QFormat[] = ["desc", "case", "term"];
 async function computeFormatWeights(subject: string): Promise<{ format: QFormat; weight: number }[]> {
   const { data } = await supabase().from("past_questions").select("subject, stem, case_text, options");
   const rows = data ?? [];
-  const globalCounts: Record<QFormat, number> = { desc: 0, case: 0, term: 0 };
-  const subjectCounts: Record<QFormat, number> = { desc: 0, case: 0, term: 0 };
+  const globalCounts: Record<QFormat, number> = { "nocase-desc": 0, "nocase-term": 0, "case-desc": 0, "case-term": 0 };
+  const subjectCounts: Record<QFormat, number> = { "nocase-desc": 0, "nocase-term": 0, "case-desc": 0, "case-term": 0 };
   for (const r of rows) {
     const fmt = classifyFormat(r.stem as string, r.case_text as string | null, (r.options as string[]) ?? []);
     globalCounts[fmt]++;
@@ -194,6 +210,14 @@ async function computeFormatWeights(subject: string): Promise<{ format: QFormat;
   });
 }
 
+// forceCaseAxis用: 4分類のうち片方の枠組み軸だけに絞った後、残った2分類の重みを
+// 合計1になるよう正規化する（絞り込み後も確率抽選として成立させるため）。
+function normalizeWeights(weights: { format: QFormat; weight: number }[]): { format: QFormat; weight: number }[] {
+  const total = weights.reduce((sum, w) => sum + w.weight, 0);
+  if (total <= 0) return weights.map((w) => ({ ...w, weight: 1 / Math.max(1, weights.length) }));
+  return weights.map((w) => ({ ...w, weight: w.weight / total }));
+}
+
 function pickFormat(weights: { format: QFormat; weight: number }[]): QFormat {
   const r = Math.random();
   let acc = 0;
@@ -201,7 +225,10 @@ function pickFormat(weights: { format: QFormat; weight: number }[]): QFormat {
     acc += weight;
     if (r < acc) return format;
   }
-  return "desc";
+  // 浮動小数点誤差で合計が1未満になった場合のみここに来る。forceCaseAxisで絞り込まれた
+  // weightsを渡された時に固定値へフォールバックすると軸が壊れるため、渡された最後の
+  // エントリを使う（weightsが空になることは無い呼び出し方しかしていない）。
+  return weights[weights.length - 1]?.format ?? "nocase-desc";
 }
 
 /**
@@ -241,52 +268,71 @@ function pickAnswerCount(weights: { count: 1 | 2; weight: number }[]): 1 | 2 {
   return 1;
 }
 
+const CASE_FRAMING_INSTRUCTION =
+  "「A精神保健福祉士」「Aさん」のように匿名の専門職またはクライエントを主人公にした短い場面を"
+  + "case_textに書くこと。場面設定は根拠テキストの範囲で無理なく成立させ、根拠テキストに無い事実は使わない。";
+
 const FORMAT_INSTRUCTION: Record<QFormat, string> = {
-  desc: "知識説明形式で作成すること。対象の事象・概念・制度・理論等について、正しい/誤った説明を選ばせる（case_textはnullでよい）。",
-  case: "事例形式で作成すること。「A精神保健福祉士」「Aさん」のように匿名の専門職またはクライエントを主人公にした短い場面を"
-    + "case_textに書き、その場面における適切な認識・対応・該当する概念などをstemで問う"
-    + "（例:「次のうち、Aさんの状態として、最も適切なものを1つ選びなさい」）。場面設定は根拠テキストの範囲で無理なく成立させ、"
-    + "根拠テキストに無い事実は使わない。",
-  term: "用語・名称選択形式で作成すること。選択肢を完全な説明文にせず、短い用語・固有名詞（病名・制度名・"
+  "nocase-desc": "知識説明形式で作成すること。対象の事象・概念・制度・理論等について、正しい/誤った説明を選ばせる（case_textはnullでよい）。",
+  "case-desc": "事例形式で作成すること。" + CASE_FRAMING_INSTRUCTION
+    + "その場面における適切な認識・対応・該当する概念などをstemで問い、選択肢は完全な説明文にする"
+    + "（例:「次のうち、Aさんの状態として、最も適切なものを1つ選びなさい」の選択肢に、対応や状態の説明文を並べる）。",
+  "nocase-term": "用語・名称選択形式で作成すること。選択肢を完全な説明文にせず、短い用語・固有名詞（病名・制度名・"
     + "役職名・分類名・数値等）そのものにする。stemは「正しい用語はどれか」と明示する必要は無く、"
     + "「次のうち、〜として、正しいものを1つ選びなさい」のような通常の定型文でよい（case_textはnullでよい）。"
     + "まれに、用語とその属性（時期・分類・段階等）の組み合わせを1行ずつ選択肢に並べ、正しい組み合わせの行を"
     + "1つ選ばせる形式にしてもよい（例: 発達段階とその時期のペアを5パターン並べ、正しいペアの行を選ばせる）。",
+  "case-term": "事例形式かつ用語・名称選択形式で作成すること。" + CASE_FRAMING_INSTRUCTION
+    + "選択肢は完全な説明文にせず、その場面に該当する短い用語・固有名詞（診断名・入院形態・制度名・"
+    + "自助グループ名・職種名等）そのものにする（例:「次のうち、Aさんが利用した入院形態として、"
+    + "最も適切なものを1つ選びなさい」の選択肢に、措置入院・医療保護入院等の制度名だけを並べる）。",
 };
 
-async function fewShotExamples(subject: string, targetFormat: QFormat, n = 3): Promise<string> {
+/**
+ * 今回作成する問題と同じ出題形式(targetFormat)の実際の過去問を最大n件、few-shotとして
+ * 提示する。同じ科目にn件揃っていれば同じ科目だけで埋め、足りない分だけ他科目から
+ * 同じ形式の実例をランダムに補う（他科目からの補充を毎回同じ問題に偏らせず、多様な
+ * 問題生成をLLMに促すため）。形式が一致しない実例で頭数を揃えることはしない
+ * （出題形式の手本としての正確さより件数を優先すると、かえって狙った形式から
+ * 外れやすくなるため）。
+ */
+async function fewShotExamples(subject: string, targetFormat: QFormat, n = 5): Promise<string> {
   // correctが空の過去問（正答表が無い年度分）は「正答: 」が空欄になり手本として
   // 不完全なので、few-shotの材料からは除外する
   const hasAnswer = (q: { correct: unknown }) => Array.isArray(q.correct) && q.correct.length > 0;
+  const classify = (q: { stem: unknown; case_text: unknown; options: unknown }) =>
+    classifyFormat(q.stem as string, q.case_text as string | null, (q.options as string[]) ?? []);
 
   const { data: subjectRows } = await supabase()
     .from("past_questions")
     .select("stem, case_text, options, correct")
     .eq("subject", subject)
     .limit(40);
-  const pool = (subjectRows ?? []).filter(hasAnswer).map((q) => ({
-    ...q,
-    format: classifyFormat(q.stem as string, q.case_text as string | null, q.options as string[]),
-  }));
-  if (pool.length === 0) return "（この科目の過去問例なし。一般的な国家試験の五肢択一形式に従うこと）";
+  const sameSubjectMatches = (subjectRows ?? [])
+    .filter(hasAnswer)
+    .filter((q) => classify(q) === targetFormat)
+    .sort(() => Math.random() - 0.5);
 
-  let targetMatches = pool.filter((q) => q.format === targetFormat).sort(() => Math.random() - 0.5);
-  if (targetMatches.length === 0 && targetFormat !== "desc") {
-    // この科目の少ないサンプルにたまたま無い場合、他科目から同じ形式の実例を借りて
-    // 「書き方」だけ真似させる（内容は本問の根拠テキストの範囲で作らせるので問題ない）
-    const { data: globalRows } = await supabase().from("past_questions").select("stem, case_text, options, correct").limit(400);
-    targetMatches = (globalRows ?? [])
+  let picks = sameSubjectMatches.slice(0, n);
+
+  if (picks.length < n) {
+    const { data: globalRows } = await supabase()
+      .from("past_questions")
+      .select("stem, case_text, options, correct")
+      .neq("subject", subject)
+      .limit(600);
+    const otherSubjectMatches = (globalRows ?? [])
       .filter(hasAnswer)
-      .map((q) => ({ ...q, format: classifyFormat(q.stem as string, q.case_text as string | null, q.options as string[]) }))
-      .filter((q) => q.format === targetFormat)
+      .filter((q) => classify(q) === targetFormat)
       .sort(() => Math.random() - 0.5);
+    picks = [...picks, ...otherSubjectMatches.slice(0, n - picks.length)];
   }
 
-  const chosen = targetMatches.slice(0, Math.min(n, 2));
-  const remaining = pool.filter((q) => !chosen.includes(q)).sort(() => Math.random() - 0.5);
-  const finalPicks = [...chosen, ...remaining.slice(0, Math.max(0, n - chosen.length))];
+  if (picks.length === 0) {
+    return "（この出題形式に一致する過去問例が見つかりませんでした。上記の出題形式の指示に厳密に従うこと）";
+  }
 
-  return finalPicks
+  return picks
     .map((q, i) => {
       const opts = (q.options as string[]).map((o, j) => `${j + 1} ${o}`).join("\n");
       const caseText = q.case_text ? `〔事例〕${q.case_text}\n` : "";
@@ -310,14 +356,17 @@ export type GenerateResult = {
  * ことになり、管理者専用にする要件そのものが破られるため、ここに引数を
  * 増やして呼び出し元から渡させるようなことは絶対にしないこと。
  *
- * poolだけは例外（サーバー内部のストック補充ロジックだけが渡す値で、クライアントから
- * 到達できないため上記の制約には抵触しない）。'exam'を指定すると実戦模試専用の
- * 未消費ストックとして書き込まれ、通常の分野別演習・ミニ模試の出題プールからは
+ * pool・forceCaseAxisだけは例外（サーバー内部のストック補充ロジックだけが渡す値で、
+ * クライアントから到達できないため上記の制約には抵触しない）。poolに'exam'を指定すると
+ * 実戦模試専用の未消費ストックとして書き込まれ、通常の科目別演習・ミニ模試の出題プールからは
  * 見えなくなる（questionSupply.ts側でpool='general'にフィルタしているため）。
+ * forceCaseAxisを指定すると、出題形式抽選のうち枠組み軸（事例の有無）だけを固定し、
+ * 課題軸（用語選択/知識説明）はその軸内で科目ごとの実績比率から通常通り抽選する
+ * （科目別演習の「事例問題のみ／事例なし」フィルタ用ストックを狙って埋めるための機能）。
  */
 export async function generateOneQuestion(
   subject: string,
-  opts: { pool?: "general" | "exam" } = {},
+  opts: { pool?: "general" | "exam"; forceCaseAxis?: CaseAxis } = {},
 ): Promise<GenerateResult> {
   const pool = opts.pool ?? "general";
   const sb = supabase();
@@ -334,7 +383,10 @@ export async function generateOneQuestion(
   // 3. 出題形式・正答数を科目ごとの実績比率から抽選（知識説明/事例/用語選択、五肢択一/択二）
   //    ＋few-shot（同科目の実際の過去問）＋この項目で既出の問題・根拠抜粋（重複回避用）
   const formatWeights = await computeFormatWeights(subject);
-  const format = pickFormat(formatWeights);
+  const scopedFormatWeights = opts.forceCaseAxis
+    ? normalizeWeights(formatWeights.filter((w) => w.format.startsWith(`${opts.forceCaseAxis}-`)))
+    : formatWeights;
+  const format = pickFormat(scopedFormatWeights);
   const answerCountWeights = await computeAnswerCountWeights(subject);
   const answerCount = pickAnswerCount(answerCountWeights);
   const fewShot = await fewShotExamples(subject, format);
@@ -392,13 +444,16 @@ export async function generateOneQuestion(
 - key_points はこの問題の周辺で覚えるべきことの整理（混同しやすい概念の対比など）
 - citation_chunk_ids には実際に根拠として使ったチャンクのid（整数）を入れる
 
-# 出題形式（過去問18科目・2回分の分析に基づく3分類。全体の目安比率は知識説明56%・
-# 事例24%・用語選択19%だが、科目によって事例形式の出やすさにはかなり差がある。
-# 今回どの形式で作るかは下の「今回作成する問題の出題形式」で指定するので、必ずそれに従うこと。
-# 指定を無視すると知識説明形式ばかりに偏ってしまうため）
-- 知識説明形式: ${FORMAT_INSTRUCTION.desc}
-- 事例形式: ${FORMAT_INSTRUCTION.case}
-- 用語選択形式: ${FORMAT_INSTRUCTION.term}`;
+# 出題形式（過去問18科目・2回分264問の全数分析に基づく2軸4分類。「事例文の有無」と
+# 「選択肢が用語か説明文か」は独立した軸であり、両方を掛け合わせて考える必要がある。
+# 全体の目安比率は 知識説明(nocase-desc)53%・用語選択(nocase-term)16%・
+# 事例×説明文(case-desc)16%・事例×用語選択(case-term)16%。科目によって各分類の
+# 出やすさにはかなり差がある。今回どの分類で作るかは下の「今回作成する問題の出題形式」で
+# 指定するので、必ずそれに従うこと。指定を無視すると知識説明形式ばかりに偏ってしまうため）
+- 知識説明形式: ${FORMAT_INSTRUCTION["nocase-desc"]}
+- 用語選択形式: ${FORMAT_INSTRUCTION["nocase-term"]}
+- 事例形式（選択肢が説明文）: ${FORMAT_INSTRUCTION["case-desc"]}
+- 事例形式（選択肢が用語選択）: ${FORMAT_INSTRUCTION["case-term"]}`;
 
   const itemContext = `# 出題対象
 科目: ${subject}

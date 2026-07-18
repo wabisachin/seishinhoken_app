@@ -23,7 +23,7 @@ const QUESTION_COLS =
  * mode=subject: 指定科目からランダム
  * mode=review:  最後の解答が誤答だった問題を優先
  *
- * mode=mockはここには無い。ミニ模試も分野別演習と同じ生成ロジック
+ * mode=mockはここには無い。ミニ模試も科目別演習と同じ生成ロジック
  * （questionSupply.tsのgetOrGenerateNext）を使うため、MockQuiz.tsxから
  * /api/subjects で科目一覧を取り、/api/quiz/next を科目ごとに直接呼んでいる。
  */

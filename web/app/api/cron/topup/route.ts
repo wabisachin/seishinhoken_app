@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { topUpAllSubjects, topUpExamPool } from "@/lib/questionSupply";
+import { topUpAllSubjects, topUpExamPool, topUpCaseAxisAllSubjects } from "@/lib/questionSupply";
 import { logError } from "@/lib/errorLog";
 
 // Vercelの関数タイムアウトを最大限使う（Fluid Compute既定は300秒）
 export const maxDuration = 300;
-// 通常プールと実戦模試プールの補充は並列で走らせる（足し算ではなく同時実行なので、
-// どちらも270秒予算のままmaxDuration=300秒に収まる）。
+// 通常プール・実戦模試プール・出題形式別ストックの補充は並列で走らせる（足し算ではなく
+// 同時実行なので、いずれも270秒予算のままmaxDuration=300秒に収まる）。
 const TOPUP_EXAM_TIME_BUDGET_MS = 270_000;
+const TOPUP_AXIS_TIME_BUDGET_MS = 270_000;
 
 /**
  * 実際にLLM生成（課金）を伴うエンドポイントのため、keepaliveと違いCRON_SECRETで保護する。
@@ -18,11 +19,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   try {
-    const [{ results, remaining }, examResult] = await Promise.all([
+    const [{ results, remaining }, examResult, axisResult] = await Promise.all([
       topUpAllSubjects(),
       topUpExamPool({ timeBudgetMs: TOPUP_EXAM_TIME_BUDGET_MS }),
+      topUpCaseAxisAllSubjects({ timeBudgetMs: TOPUP_AXIS_TIME_BUDGET_MS }),
     ]);
-    return NextResponse.json({ ok: true, results, remaining, exam: examResult });
+    return NextResponse.json({ ok: true, results, remaining, exam: examResult, caseAxis: axisResult });
   } catch (e) {
     await logError("cron-topup", e);
     const message = e instanceof Error ? e.message : String(e);

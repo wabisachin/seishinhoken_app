@@ -16,7 +16,7 @@ export default function GuidePage() {
         <h2 className="font-bold text-indigo-700">3つの使い方</h2>
         <div className="mt-3 space-y-4 text-sm leading-relaxed text-stone-700">
           <div>
-            <p className="font-medium text-stone-900">① 分野別演習</p>
+            <p className="font-medium text-stone-900">① 科目別演習</p>
             <p className="mt-1">
               科目を1つ選んで、1問ずつじっくり解きます。答えるとすぐに正解と解説が表示されるので、
               1問ごとに理解しながら進められます。
@@ -33,7 +33,7 @@ export default function GuidePage() {
           <div>
             <p className="font-medium text-stone-900">③ 復習モード</p>
             <p className="mt-1">
-              分野別演習・ミニ模試で間違えた問題は自動的にここに溜まります。科目を選ぶか全科目からまとめて、
+              科目別演習・ミニ模試で間違えた問題は自動的にここに溜まります。科目を選ぶか全科目からまとめて、
               間違えた回数が多いものほど優先的に再出題されます。この学習の最終ゴールは、ホーム画面に出る
               「間違えたまま残っている問題数」を0にすることです。
             </p>
@@ -73,7 +73,7 @@ export default function GuidePage() {
       <section className="rounded-2xl bg-white p-5 shadow-warm">
         <h2 className="font-bold text-indigo-700">解いている途中でアプリを閉じてしまっても</h2>
         <p className="mt-2 text-sm leading-relaxed text-stone-700">
-          分野別演習やミニ模試の途中でブラウザを閉じたり、リロードしてしまっても大丈夫です。
+          科目別演習やミニ模試の途中でブラウザを閉じたり、リロードしてしまっても大丈夫です。
           次にそのモードを開いたときに「前回の続きから再開しますか？」という案内が出るので、
           そこから続けるか、新しく始めるかを選べます。
         </p>
