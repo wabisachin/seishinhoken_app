@@ -3,6 +3,7 @@ import { generateOneQuestion } from "./generation";
 import { logError } from "./errorLog";
 import { listSubjects } from "./subjects";
 import type { Question } from "./types";
+import { EXAM_SUBJECT_COUNTS, EXAM_STOCK_SESSIONS_AHEAD } from "./examFormat";
 
 // 累積アクティブ数がこれ未満の間は、ストック補充のたびに必ず新規生成する
 const FULL_GENERATION_UNTIL = 50;
@@ -15,11 +16,15 @@ const HARD_CAP_TOTAL = 250;
 const QUESTION_COLS =
   "id, subject, taxonomy_id, question_type, stem, case_text, options, correct, explanations, key_points, citations";
 
-async function countBySubject(subject: string, statuses: string[]): Promise<number> {
+// pool='general'（通常プール）に限定するのが既定。'exam'ストック関連の関数だけが
+// 明示的に'exam'を渡す。こうしないと実戦模試専用の未消費問題が分野別演習・
+// ミニ模試に混入してしまう。
+async function countBySubject(subject: string, statuses: string[], pool: "general" | "exam" = "general"): Promise<number> {
   const { count } = await supabase()
     .from("questions")
     .select("id", { count: "exact", head: true })
     .eq("subject", subject)
+    .eq("pool", pool)
     .in("status", statuses);
   return count ?? 0;
 }
@@ -30,6 +35,7 @@ async function fetchUnseenActive(subject: string, excludeIds: number[]): Promise
     .select(QUESTION_COLS)
     .eq("subject", subject)
     .eq("status", "active")
+    .eq("pool", "general")
     .limit(1);
   if (excludeIds.length > 0) query = query.not("id", "in", `(${excludeIds.join(",")})`);
   const { data, error } = await query;
@@ -50,7 +56,8 @@ async function fetchLeastAttempted(subject: string): Promise<Question | null> {
     .from("questions")
     .select(QUESTION_COLS)
     .eq("subject", subject)
-    .eq("status", "active");
+    .eq("status", "active")
+    .eq("pool", "general");
   const rows = (active ?? []) as Question[];
   if (rows.length === 0) return null;
 
@@ -83,7 +90,12 @@ const TOPUP_BATCH_CAP = 10;
  * 見る必要がある。これが「今すぐ出せる在庫」の実態に対応する。
  */
 async function countUnservedActive(subject: string): Promise<number> {
-  const { data: active } = await supabase().from("questions").select("id").eq("subject", subject).eq("status", "active");
+  const { data: active } = await supabase()
+    .from("questions")
+    .select("id")
+    .eq("subject", subject)
+    .eq("status", "active")
+    .eq("pool", "general");
   const ids = (active ?? []).map((r) => r.id as number);
   if (ids.length === 0) return 0;
   const { data: attempted } = await supabase()
@@ -267,6 +279,71 @@ export async function getStockSnapshot(): Promise<SubjectStock[]> {
         countBySubject(subject, ["active", "rejected"]),
       ]);
       return { subject, unserved, active, total };
+    }),
+  );
+}
+
+// 実戦模試専用の未消費ストック（pool='exam', status='active'）の科目ごとの件数。
+async function countExamPoolActive(subject: string): Promise<number> {
+  return countBySubject(subject, ["active"], "exam");
+}
+
+// topUpSubjectと同じ「同一プロセス内での多重起動防止」ガード。キーを分けて
+// 通常プールのtopUpSubjectとは独立に動くようにする。
+const examTopUpInFlight = new Set<string>();
+
+/**
+ * 実戦模試プールを「科目ごとの本番出題数 × EXAM_STOCK_SESSIONS_AHEAD」まで埋める。
+ * 通常プールの50/200テーパー（コスト逓減ポリシー）は適用しない ── 実戦模試は
+ * 月5回という需要が明確なので、単純に目標件数までひたすら埋めるだけでよい。
+ * 却下が続いても諦めずに時間予算いっぱいまで試行する（topUpSubjectと同じ考え方）。
+ */
+export async function topUpExamPool(opts: { timeBudgetMs?: number } = {}): Promise<{ generated: number }> {
+  const { timeBudgetMs = Infinity } = opts;
+  const start = Date.now();
+  let generated = 0;
+  for (const { subject, questions } of EXAM_SUBJECT_COUNTS) {
+    if (Date.now() - start >= timeBudgetMs) break;
+    if (examTopUpInFlight.has(subject)) continue;
+    examTopUpInFlight.add(subject);
+    try {
+      const target = questions * EXAM_STOCK_SESSIONS_AHEAD;
+      let active = await countExamPoolActive(subject);
+      while (active < target && Date.now() - start < timeBudgetMs) {
+        try {
+          const result = await generateOneQuestion(subject, { pool: "exam" });
+          generated++;
+          if (result.status === "active") {
+            active++;
+          } else {
+            await logError("generation-rejected", new Error("実戦模試用の問題が却下されました"), {
+              subject,
+              topic: result.topic,
+              problems: result.problems,
+            });
+          }
+        } catch (e) {
+          await logError("exam-topup", e, { subject });
+          break;
+        }
+      }
+    } finally {
+      examTopUpInFlight.delete(subject);
+    }
+  }
+  return { generated };
+}
+
+/** 管理者ページ表示用。実戦模試プールの科目ごとの在庫スナップショット（目標件数付き）。 */
+export async function getExamStockSnapshot(): Promise<(SubjectStock & { target: number })[]> {
+  return Promise.all(
+    EXAM_SUBJECT_COUNTS.map(async ({ subject, questions }) => {
+      const [active, total] = await Promise.all([
+        countExamPoolActive(subject),
+        countBySubject(subject, ["active", "rejected"], "exam"),
+      ]);
+      const target = questions * EXAM_STOCK_SESSIONS_AHEAD;
+      return { subject, unserved: active, active, total, target };
     }),
   );
 }
