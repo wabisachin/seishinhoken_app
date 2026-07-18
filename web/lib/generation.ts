@@ -121,24 +121,41 @@ async function existingCoverage(taxonomyId: number, limit = 15) {
 }
 
 /**
- * 過去問(18科目・2回分264問)を分析した結果の出題形式3分類。
- * - desc: 事象・概念・制度・理論等の正誤を問う知識説明形式（全体では約68%、これまで
- *   LLMがほぼ常に選んでいた形式）
+ * 過去問(18科目・2回分264問を全件精査)を分析した結果の出題形式3分類。
+ * - desc: 事象・概念・制度・理論等を、文単位の説明文の正誤で問う知識説明形式
  * - case: 「A精神保健福祉士」「Aさん」等の匿名の専門職・クライエントを主人公にした
  *   短い場面を設定し、その場面における適切な認識・対応等を問う事例形式（全体では
- *   約31%を占めるにもかかわらず、放置するとLLMがほぼ生成しない形式）
- * - term: 「正しい用語はどれか」を明示的に問う用語選択形式（全体では1%未満、稀）
+ *   約24%を占めるにもかかわらず、放置するとLLMがほぼ生成しない形式）
+ * - term: 用語・名称そのものを選ばせる形式。「正しい用語はどれか」のようにstemが
+ *   明示することは稀（264問中2問だけ）で、実際の大半は「〜として、正しいものを
+ *   1つ選びなさい」という定型文のまま、選択肢が完全な説明文ではなく短い固有名詞・
+ *   専門用語（病名・制度名・役職名・数値等）そのものになっている形。stemの文字列
+ *   一致だけで判定すると1%未満に見えるが、選択肢の平均文字数まで見ると実際には
+ *   全体の約18%を占める（医学概論・精神医学と精神医療等の科目に偏って多く、
+ *   社会学と社会システム・社会保障等の政策・対人援助系科目にはほぼ出ない）。
+ *   まれに（264問中2問、医学概論に集中）「用語とその属性（時期・分類等）の
+ *   組み合わせとして正しいものを1つ選ぶ」ペア形式も見られたため、term形式の
+ *   指示（FORMAT_INSTRUCTION.term）にはこのバリエーションも含めている
+ *   （サンプルが少なく単独の重み付きカテゴリにするほどの精度は無いため）。
  *
- * 科目によってcaseの出やすさに大きな差がある（例: 「ソーシャルワークの理論と方法」は
- * 過去2回で18問中11問が事例形式=61%な一方、「社会福祉の原理と政策」は18問中0問=0%）
- * ため、固定比率ではなく科目ごとの実績から動的に算出する（下記computeFormatWeights）。
+ * 科目によってcase・termの出やすさに大きな差がある（例: 「ソーシャルワークの理論と
+ * 方法」は事例形式が過去2回で18問中11問=61%、「精神医学と精神医療」は用語形式が
+ * 79%を占める一方、他方はほぼ0%）ため、固定比率ではなく科目ごとの実績から動的に
+ * 算出する（下記computeFormatWeights）。
  */
 type QFormat = "case" | "term" | "desc";
 
-function classifyFormat(stem: string, caseText: string | null): QFormat {
+// 選択肢の平均文字数がこれ未満なら、文単位の説明文ではなく短い用語・固有名詞の
+// 羅列（用語選択形式）とみなす（過去問精査で「用語」を明示するstemはほぼ無い一方、
+// 選択肢自体は短い名称のみというケースが大半だったため、実質的な判定材料はこちら）。
+const TERM_AVG_OPTION_LENGTH = 20;
+
+function classifyFormat(stem: string, caseText: string | null, options: string[]): QFormat {
   const combined = `${stem} ${caseText ?? ""}`;
   if ((caseText && caseText.trim().length > 0) || /[A-Za-zＡ-Ｚ]\s*さん/.test(combined)) return "case";
   if (stem.includes("用語")) return "term";
+  const avgOptionLength = options.length > 0 ? options.reduce((sum, o) => sum + o.length, 0) / options.length : Infinity;
+  if (avgOptionLength < TERM_AVG_OPTION_LENGTH) return "term";
   return "desc";
 }
 
@@ -150,18 +167,24 @@ const QFORMATS: QFormat[] = ["desc", "case", "term"];
  * ベイズ的に混ぜる（科目のサンプルが多いほど、その科目自身の実績に近づく）。
  */
 async function computeFormatWeights(subject: string): Promise<{ format: QFormat; weight: number }[]> {
-  const { data } = await supabase().from("past_questions").select("subject, stem, case_text");
+  const { data } = await supabase().from("past_questions").select("subject, stem, case_text, options");
   const rows = data ?? [];
   const globalCounts: Record<QFormat, number> = { desc: 0, case: 0, term: 0 };
   const subjectCounts: Record<QFormat, number> = { desc: 0, case: 0, term: 0 };
   for (const r of rows) {
-    const fmt = classifyFormat(r.stem as string, r.case_text as string | null);
+    const fmt = classifyFormat(r.stem as string, r.case_text as string | null, (r.options as string[]) ?? []);
     globalCounts[fmt]++;
     if (r.subject === subject) subjectCounts[fmt]++;
   }
   const globalTotal = Math.max(1, QFORMATS.reduce((sum, f) => sum + globalCounts[f], 0));
   const subjectTotal = QFORMATS.reduce((sum, f) => sum + subjectCounts[f], 0);
-  const K = 8; // 平滑化の強さ（このぶんだけ全体平均寄りに引っ張る）
+  // 平滑化の強さ（このぶんだけ全体平均寄りに引っ張る）。科目ごとのサンプルは
+  // 過去問2回分で1科目あたり平均15問程度しか無く、そのまま実績比率にすると
+  // 少数サンプルのブレ（たまたま0問だった等）をそのまま信じてしまう。そのため
+  // K=15と、平均的な科目サンプル数と同程度まで強めにして、科目差自体は残しつつ
+  // （精神医学と精神医療のterm多用等、実際に大きな差がある科目はK=15でも
+  // 十分残る）全体傾向寄りに引っ張る比重を上げている。
+  const K = 15;
   return QFORMATS.map((format) => {
     const globalP = globalCounts[format] / globalTotal;
     const weight = (subjectCounts[format] + globalP * K) / (subjectTotal + K);
@@ -197,7 +220,8 @@ async function computeAnswerCountWeights(subject: string): Promise<{ count: 1 | 
   }
   const globalTotal = Math.max(1, globalCounts[1] + globalCounts[2]);
   const subjectTotal = subjectCounts[1] + subjectCounts[2];
-  const K = 8;
+  // computeFormatWeightsと同じ理由（科目あたり平均15問程度の少数サンプル）でKを強めにする
+  const K = 15;
   return ([1, 2] as const).map((count) => {
     const globalP = globalCounts[count] / globalTotal;
     const weight = (subjectCounts[count] + globalP * K) / (subjectTotal + K);
@@ -221,7 +245,11 @@ const FORMAT_INSTRUCTION: Record<QFormat, string> = {
     + "case_textに書き、その場面における適切な認識・対応・該当する概念などをstemで問う"
     + "（例:「次のうち、Aさんの状態として、最も適切なものを1つ選びなさい」）。場面設定は根拠テキストの範囲で無理なく成立させ、"
     + "根拠テキストに無い事実は使わない。",
-  term: "用語選択形式で作成すること。「正しい用語はどれか」のように、用語そのものを問う形にする（case_textはnullでよい）。",
+  term: "用語・名称選択形式で作成すること。選択肢を完全な説明文にせず、短い用語・固有名詞（病名・制度名・"
+    + "役職名・分類名・数値等）そのものにする。stemは「正しい用語はどれか」と明示する必要は無く、"
+    + "「次のうち、〜として、正しいものを1つ選びなさい」のような通常の定型文でよい（case_textはnullでよい）。"
+    + "まれに、用語とその属性（時期・分類・段階等）の組み合わせを1行ずつ選択肢に並べ、正しい組み合わせの行を"
+    + "1つ選ばせる形式にしてもよい（例: 発達段階とその時期のペアを5パターン並べ、正しいペアの行を選ばせる）。",
 };
 
 async function fewShotExamples(subject: string, targetFormat: QFormat, n = 3): Promise<string> {
@@ -236,7 +264,7 @@ async function fewShotExamples(subject: string, targetFormat: QFormat, n = 3): P
     .limit(40);
   const pool = (subjectRows ?? []).filter(hasAnswer).map((q) => ({
     ...q,
-    format: classifyFormat(q.stem as string, q.case_text as string | null),
+    format: classifyFormat(q.stem as string, q.case_text as string | null, q.options as string[]),
   }));
   if (pool.length === 0) return "（この科目の過去問例なし。一般的な国家試験の五肢択一形式に従うこと）";
 
@@ -247,7 +275,7 @@ async function fewShotExamples(subject: string, targetFormat: QFormat, n = 3): P
     const { data: globalRows } = await supabase().from("past_questions").select("stem, case_text, options, correct").limit(400);
     targetMatches = (globalRows ?? [])
       .filter(hasAnswer)
-      .map((q) => ({ ...q, format: classifyFormat(q.stem as string, q.case_text as string | null) }))
+      .map((q) => ({ ...q, format: classifyFormat(q.stem as string, q.case_text as string | null, q.options as string[]) }))
       .filter((q) => q.format === targetFormat)
       .sort(() => Math.random() - 0.5);
   }

@@ -99,7 +99,9 @@ function QuizInner({ mode }: { mode: Mode }) {
   const [pendingResume, setPendingResume] = useState<PersistedSubjectSession | null>(null);
   const [generatingAttempt, setGeneratingAttempt] = useState(0);
   const [expandedCitation, setExpandedCitation] = useState<number | null>(null);
-  const [reviewSubjects, setReviewSubjects] = useState<{ subject: string; wrongCount: number }[]>([]);
+  const [reviewSubjects, setReviewSubjects] = useState<
+    { subject: string; correct: number; total: number; wrongCount: number; accuracy: number }[]
+  >([]);
   const [reviewTotalWrong, setReviewTotalWrong] = useState(0);
   const [reviewSummaryLoading, setReviewSummaryLoading] = useState(true);
   const cancelledRef = useRef(false);
@@ -517,21 +519,21 @@ function QuizInner({ mode }: { mode: Mode }) {
                   <p className="mt-1 text-sm text-stone-600">間違えた問題 {reviewTotalWrong}問から、間違えた回数が多いものほど出やすいランダム出題</p>
                 </button>
                 <div>
-                  <p className="mb-2 text-sm font-medium text-stone-700">科目ごとに復習する（苦手なほど数字が目立ちます）</p>
+                  <p className="mb-2 text-sm font-medium text-stone-700">科目ごとに復習する（正答率が低いほど目立ちます）</p>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     {reviewSubjects.map((s) => {
-                      const maxWrong = reviewSubjects[0]?.wrongCount ?? 1;
-                      const ratio = s.wrongCount / Math.max(maxWrong, 1);
+                      // 苦手判定は間違えた問題数の絶対数ではなく正答率で行う
+                      // （出題数が多い科目ほど間違えた数も単純に増えるため）
                       const style =
-                        ratio >= 0.7
+                        s.accuracy < 50
                           ? "border-red-500 bg-red-50"
-                          : ratio >= 0.4
+                          : s.accuracy < 70
                             ? "border-amber-500 bg-amber-50"
                             : "border-stone-300 bg-white";
                       const badgeStyle =
-                        ratio >= 0.7
+                        s.accuracy < 50
                           ? "bg-red-600 text-white"
-                          : ratio >= 0.4
+                          : s.accuracy < 70
                             ? "bg-amber-500 text-white"
                             : "bg-stone-200 text-stone-700";
                       return (
@@ -544,8 +546,13 @@ function QuizInner({ mode }: { mode: Mode }) {
                           className={`flex items-center justify-between rounded-xl border-l-4 p-3 text-left shadow-warm-sm transition-all hover:-translate-y-0.5 hover:shadow-warm ${style}`}
                         >
                           <span className="text-sm font-medium text-stone-800">{s.subject}</span>
-                          <span className={`ml-2 shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${badgeStyle}`}>
-                            {s.wrongCount}問
+                          <span className="ml-2 flex shrink-0 flex-col items-end">
+                            <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${badgeStyle}`}>
+                              正答率{s.accuracy}%
+                            </span>
+                            <span className="mt-1 text-xs text-stone-400">
+                              {s.total}問中{s.correct}問正解
+                            </span>
                           </span>
                         </button>
                       );

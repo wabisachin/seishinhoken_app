@@ -3,8 +3,10 @@ import { supabase } from "@/lib/supabase";
 import { logError } from "@/lib/errorLog";
 
 /**
- * 復習モードの科目選択画面用。科目ごとに「最新解答が誤答のままの問題数」を返す。
- * これが多い科目ほど苦手科目とみなし、選択画面で視覚的に目立たせる材料にする。
+ * 復習モードの科目選択画面用。科目ごとに正答率（最新解答ベース）を返す。
+ * 苦手科目の判定は間違えた問題数の絶対数ではなく正答率で行うのが正確なため
+ * （出題数が多い科目ほど間違えた問題数も単純に多くなりがちなことへの対策）。
+ * 併せて「何問中何問正解」も返し、率だけでなく実数もユーザーに分かるようにする。
  */
 export async function GET() {
   try {
@@ -24,17 +26,26 @@ export async function GET() {
       latest.set(a.question_id, { ok: a.is_correct as boolean, subject });
     }
 
-    const wrongCountBySubject = new Map<string, number>();
+    const bySubject = new Map<string, { correct: number; total: number }>();
     let totalWrong = 0;
     for (const { ok, subject } of latest.values()) {
-      if (ok) continue;
-      wrongCountBySubject.set(subject, (wrongCountBySubject.get(subject) ?? 0) + 1);
-      totalWrong++;
+      const s = bySubject.get(subject) ?? { correct: 0, total: 0 };
+      s.total++;
+      if (ok) s.correct++;
+      else totalWrong++;
+      bySubject.set(subject, s);
     }
 
-    const subjects = [...wrongCountBySubject.entries()]
-      .map(([subject, wrongCount]) => ({ subject, wrongCount }))
-      .sort((a, b) => b.wrongCount - a.wrongCount);
+    const subjects = [...bySubject.entries()]
+      .map(([subject, s]) => ({
+        subject,
+        correct: s.correct,
+        total: s.total,
+        wrongCount: s.total - s.correct,
+        accuracy: Math.round((100 * s.correct) / Math.max(s.total, 1)),
+      }))
+      .filter((s) => s.wrongCount > 0) // 復習対象が無い科目は選択肢に出す意味が無い
+      .sort((a, b) => a.accuracy - b.accuracy);
 
     return NextResponse.json({ subjects, totalWrong });
   } catch (e) {
