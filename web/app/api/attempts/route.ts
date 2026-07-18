@@ -5,7 +5,7 @@ import { logError } from "@/lib/errorLog";
 /** 解答を記録する。正誤判定はサーバー側でDBのcorrectと照合して行う */
 export async function POST(req: NextRequest) {
   try {
-    const { question_id, selected, mode, profile } = await req.json();
+    const { question_id, selected, mode, profile, exam_attempt_id } = await req.json();
     if (!question_id || !Array.isArray(selected) || !mode) {
       return NextResponse.json({ error: "question_id, selected[], mode are required" }, { status: 400 });
     }
@@ -30,6 +30,7 @@ export async function POST(req: NextRequest) {
       is_correct: isCorrect,
       mode,
       profile: safeProfile,
+      exam_attempt_id: mode === "exam" && exam_attempt_id ? exam_attempt_id : null,
     });
     if (insError) throw new Error(insError.message);
 
