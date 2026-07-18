@@ -40,25 +40,6 @@ export default function PassGuidePage() {
         年度によって変わる数値（合格ラインの実際の点数など）は、直近の回の実績として記載しています。
       </p>
 
-      <section className="rounded-2xl border-l-4 border-rose-400 bg-white p-5 shadow-warm">
-        <h2 className="font-bold text-rose-700">このアプリでの学習のゴール</h2>
-        <div className="mt-2 space-y-2 text-sm leading-relaxed text-stone-700">
-          <p>
-            分野別演習・全分野ミニ模試で間違えた問題は、自動的に「弱点ストック」として記録されます。
-            復習モードでは、そのストックの中から間違えた回数が多いものほど優先的に出題されます。
-          </p>
-          <p className="font-medium text-rose-800">
-            この学習の最終ゴールは、弱点ストックに残っている問題を復習モードで解き直し続け、
-            最終的に「間違えたまま残っている問題が0問」の状態にすることです。
-          </p>
-          <p>
-            ホーム画面には常に現在の弱点ストック数が表示されます。演習・模試で新しい間違いが増えても、
-            復習モードで解き直して正解すればストックから減っていきます。この数を追いかけることが、
-            日々何をすればいいか迷ったときの一番シンプルな指針になります。
-          </p>
-        </div>
-      </section>
-
       <section className="rounded-2xl bg-white p-5 shadow-warm">
         <h2 className="font-bold text-indigo-700">時期に応じた分野別演習・復習モードの比率の変え方</h2>
         <p className="mt-2 text-sm leading-relaxed text-stone-700">
