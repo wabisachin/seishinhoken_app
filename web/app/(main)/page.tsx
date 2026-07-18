@@ -14,17 +14,12 @@ type SubjectRow = {
 export default function Dashboard() {
   const [subjects, setSubjects] = useState<SubjectRow[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [totalWrong, setTotalWrong] = useState<number | null>(null);
 
   useEffect(() => {
     fetch("/api/subjects")
       .then((r) => r.json())
       .then((d) => (d.error ? setError(d.error) : setSubjects(d.subjects)))
       .catch((e) => setError(String(e)));
-    fetch("/api/quiz/review-summary")
-      .then((r) => r.json())
-      .then((d) => setTotalWrong(typeof d.totalWrong === "number" ? d.totalWrong : null))
-      .catch(() => setTotalWrong(null));
   }, []);
 
   const common = subjects.filter((s) => s.kind === "common");
@@ -33,24 +28,6 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {totalWrong !== null && totalWrong > 0 && (
-        <Link
-          href="/quiz?mode=review"
-          className="block rounded-2xl border-l-4 border-rose-500 bg-rose-50 p-4 shadow-warm transition-all hover:-translate-y-0.5 hover:shadow-warm-lg"
-        >
-          <p className="text-sm text-rose-900">
-            <span className="text-lg font-bold">{totalWrong}問</span>
-            が間違えたまま復習待ちです。この学習の最終ゴールは、間違えた問題を全て復習モードで解き直し、
-            <span className="font-medium">この数を0にすること</span>
-            です。
-          </p>
-        </Link>
-      )}
-      {totalWrong === 0 && (
-        <div className="rounded-2xl border-l-4 border-green-500 bg-green-50 p-4 shadow-warm">
-          <p className="text-sm text-green-900">現在、間違えたまま残っている問題はありません。演習を続けて苦手を早めに見つけましょう。</p>
-        </div>
-      )}
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Link
           href="/quiz?mode=subject"
