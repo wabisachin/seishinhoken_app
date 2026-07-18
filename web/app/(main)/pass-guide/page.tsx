@@ -1,35 +1,36 @@
-const SUBJECT_GROUPS: { label: string; subjects: string[] }[] = [
-  { label: "①", subjects: ["精神医学と精神医療"] },
-  { label: "②", subjects: ["現代の精神保健の課題と支援"] },
-  { label: "③", subjects: ["精神保健福祉の原理"] },
-  { label: "④", subjects: ["ソーシャルワークの理論と方法(専門)"] },
-  { label: "⑤", subjects: ["精神障害リハビリテーション論", "精神保健福祉制度論"] },
-  { label: "⑥", subjects: ["医学概論", "心理学と心理的支援", "社会学と社会システム"] },
-  { label: "⑦", subjects: ["社会福祉の原理と政策", "社会保障", "権利擁護を支える法制度"] },
-  { label: "⑧", subjects: ["地域福祉と包括的支援体制", "障害者福祉", "刑事司法と福祉"] },
-  { label: "⑨", subjects: ["ソーシャルワークの基盤と専門職", "ソーシャルワークの理論と方法", "社会福祉調査の基礎"] },
-];
+import { EXAM_SUBJECT_COUNTS, EXAM_SUBJECT_GROUPS } from "@/lib/examFormat";
 
-const SUBJECT_COUNTS: { subject: string; session: "午前（共通）" | "午後（専門）"; questions: number; hours: 60 | 30 }[] = [
-  { subject: "医学概論", session: "午前（共通）", questions: 6, hours: 30 },
-  { subject: "心理学と心理的支援", session: "午前（共通）", questions: 6, hours: 30 },
-  { subject: "社会学と社会システム", session: "午前（共通）", questions: 6, hours: 30 },
-  { subject: "社会福祉の原理と政策", session: "午前（共通）", questions: 9, hours: 60 },
-  { subject: "社会保障", session: "午前（共通）", questions: 9, hours: 60 },
-  { subject: "権利擁護を支える法制度", session: "午前（共通）", questions: 6, hours: 30 },
-  { subject: "地域福祉と包括的支援体制", session: "午前（共通）", questions: 9, hours: 60 },
-  { subject: "障害者福祉", session: "午前（共通）", questions: 6, hours: 30 },
-  { subject: "刑事司法と福祉", session: "午前（共通）", questions: 6, hours: 30 },
-  { subject: "ソーシャルワークの基盤と専門職", session: "午前（共通）", questions: 6, hours: 30 },
-  { subject: "ソーシャルワークの理論と方法", session: "午前（共通）", questions: 9, hours: 60 },
-  { subject: "社会福祉調査の基礎", session: "午前（共通）", questions: 6, hours: 30 },
-  { subject: "精神医学と精神医療", session: "午後（専門）", questions: 9, hours: 60 },
-  { subject: "現代の精神保健の課題と支援", session: "午後（専門）", questions: 9, hours: 60 },
-  { subject: "精神保健福祉の原理", session: "午後（専門）", questions: 9, hours: 60 },
-  { subject: "ソーシャルワークの理論と方法(専門)", session: "午後（専門）", questions: 9, hours: 60 },
-  { subject: "精神障害リハビリテーション論", session: "午後（専門）", questions: 6, hours: 30 },
-  { subject: "精神保健福祉制度論", session: "午後（専門）", questions: 6, hours: 30 },
-];
+const SUBJECT_GROUPS = EXAM_SUBJECT_GROUPS;
+
+// 養成課程の標準履修時間（60時間科目は30時間科目の倍の分量が想定されている「本丸」科目）。
+// 出題数・パート区分自体はexamFormat.tsのEXAM_SUBJECT_COUNTSと二重管理しない。
+const HOURS_BY_SUBJECT: Record<string, 60 | 30> = {
+  医学概論: 30,
+  心理学と心理的支援: 30,
+  社会学と社会システム: 30,
+  社会福祉の原理と政策: 60,
+  社会保障: 60,
+  権利擁護を支える法制度: 30,
+  地域福祉と包括的支援体制: 60,
+  障害者福祉: 30,
+  刑事司法と福祉: 30,
+  ソーシャルワークの基盤と専門職: 30,
+  ソーシャルワークの理論と方法: 60,
+  社会福祉調査の基礎: 30,
+  精神医学と精神医療: 60,
+  現代の精神保健の課題と支援: 60,
+  精神保健福祉の原理: 60,
+  "ソーシャルワークの理論と方法(専門)": 60,
+  精神障害リハビリテーション論: 30,
+  精神保健福祉制度論: 30,
+};
+const SESSION_LABEL: Record<"common" | "specialized", string> = { common: "午前（共通）", specialized: "午後（専門）" };
+const SUBJECT_COUNTS = EXAM_SUBJECT_COUNTS.map((s) => ({
+  subject: s.subject,
+  session: SESSION_LABEL[s.part],
+  questions: s.questions,
+  hours: HOURS_BY_SUBJECT[s.subject],
+}));
 
 export default function PassGuidePage() {
   return (
