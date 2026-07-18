@@ -548,10 +548,10 @@ function QuizInner({ mode }: { mode: Mode }) {
                           <span className="text-sm font-medium text-stone-800">{s.subject}</span>
                           <span className="ml-2 flex shrink-0 flex-col items-end">
                             <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${badgeStyle}`}>
-                              正答率{s.accuracy}%
+                              直近正答率{s.accuracy}%
                             </span>
                             <span className="mt-1 text-xs text-stone-400">
-                              {s.total}問中{s.correct}問正解
+                              直近{s.total}問中{s.correct}問正解
                             </span>
                           </span>
                         </button>
