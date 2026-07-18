@@ -18,7 +18,7 @@ const QUESTION_COLS =
 
 // pool='general'（通常プール）に限定するのが既定。'exam'ストック関連の関数だけが
 // 明示的に'exam'を渡す。こうしないと実戦模試専用の未消費問題が科目別演習・
-// ミニ模試に混入してしまう。
+// 全科目演習に混入してしまう。
 async function countBySubject(subject: string, statuses: string[], pool: "general" | "exam" = "general"): Promise<number> {
   const { count } = await supabase()
     .from("questions")

@@ -17,7 +17,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             <ProfileBadge />
           </div>
           <nav className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm font-medium text-indigo-50">
-            <Link href="/quiz" className="transition-colors hover:text-white">演習</Link>
+            <Link href="/" className="transition-colors hover:text-white">ホーム</Link>
             <Link href="/full-mock" className="transition-colors hover:text-white">実戦模試</Link>
             <Link href="/stats" className="transition-colors hover:text-white">成績</Link>
             <Link href="/pass-guide" className="transition-colors hover:text-white">合格ガイド</Link>

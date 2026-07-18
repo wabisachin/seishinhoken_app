@@ -14,7 +14,7 @@ function addTo(map: Map<string, Bucket>, key: string, attempts: number, correct:
 }
 
 /**
- * 本人(profile='self')の成績を返す。科目別演習・ミニ模試・復習モードなど全モードを
+ * 本人(profile='self')の成績を返す。科目別演習・全科目演習・復習モードなど全モードを
  * 合算した従来のsubject_statsではなく、実戦模試（exam_subject_stats、一度も出題
  * されていない問題だけで構成される本番同形式の模試）のみを対象にする。既出問題の
  * 解き直しが混ざると「未知の問題への対応力」という知りたい指標が読めなくなるため。

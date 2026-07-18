@@ -6,7 +6,7 @@ import Link from "next/link";
 import type { Mode, Question } from "@/lib/types";
 import { dedupeCitations } from "@/lib/citations";
 import { getStoredProfile } from "@/lib/profile";
-import MockQuiz from "./MockQuiz";
+import AllSubjectsQuiz from "./AllSubjectsQuiz";
 
 type Phase =
   | "resume-prompt"
@@ -73,6 +73,22 @@ function clearSubjectSession() {
   localStorage.removeItem(SUBJECT_SESSION_KEY);
 }
 
+type ReviewSubjectSummary = {
+  subject: string;
+  correct: number;
+  total: number;
+  wrongCount: number;
+  everMissed: number;
+  accuracy: number | null;
+};
+
+// review-summaryは全科目（克服済みも含む）を返すため、復習モードの選択肢としては
+// 弱点ストックが残っている（wrongCount > 0）科目だけに絞る
+// （ホーム画面の弱点マップは同じAPIを全科目のまま別途利用する）
+function reviewCandidates(subjects: ReviewSubjectSummary[]): ReviewSubjectSummary[] {
+  return subjects.filter((s) => s.wrongCount > 0);
+}
+
 async function requestNextQuestion(
   subject: string,
   excludeIds: number[],
@@ -88,14 +104,17 @@ async function requestNextQuestion(
   return { question: (d.question as Question | null) ?? null, exhausted: !!d.exhausted };
 }
 
-function QuizInner({ mode }: { mode: Mode }) {
+function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: string | null }) {
   // 分野別モードは「前回セッションがあるか」をマウント後のeffectで判定してから
   // resume-promptかsetupに遷移する。判定が終わるまでの初期値は必ず何か表示される
   // phaseにしておく（resume-promptはpendingResumeが無いと何も描画しないため、
   // 初期値に使うとハイドレーション完了までの一瞬〜稀に長時間、画面が真っ暗に見える）。
   const [phase, setPhase] = useState<Phase>(mode === "subject" ? "loading" : "setup");
   const [subjects, setSubjects] = useState<{ subject: string; taxonomy_items: number; kind: string | null }[]>([]);
-  const [subject, setSubject] = useState("");
+  // ホーム画面のおすすめアクションから科目を指定して遷移してきた場合、科目別演習の
+  // 選択画面でその科目をあらかじめ選んだ状態にする（自動開始はしない。出題数など
+  // 他の設定を確認してから開始できるようにするため）
+  const [subject, setSubject] = useState(mode === "subject" && initialSubject ? initialSubject : "");
   const [count, setCount] = useState(DEFAULT_SESSION_COUNT);
   const [caseFilter, setCaseFilter] = useState<CaseFilter>("all");
   const [countInput, setCountInput] = useState(String(DEFAULT_SESSION_COUNT));
@@ -108,9 +127,7 @@ function QuizInner({ mode }: { mode: Mode }) {
   const [pendingResume, setPendingResume] = useState<PersistedSubjectSession | null>(null);
   const [generatingAttempt, setGeneratingAttempt] = useState(0);
   const [expandedCitation, setExpandedCitation] = useState<number | null>(null);
-  const [reviewSubjects, setReviewSubjects] = useState<
-    { subject: string; correct: number; total: number; wrongCount: number; accuracy: number }[]
-  >([]);
+  const [reviewSubjects, setReviewSubjects] = useState<ReviewSubjectSummary[]>([]);
   const [reviewTotalWrong, setReviewTotalWrong] = useState(0);
   const [reviewSummaryLoading, setReviewSummaryLoading] = useState(true);
   const cancelledRef = useRef(false);
@@ -133,7 +150,7 @@ function QuizInner({ mode }: { mode: Mode }) {
       fetch("/api/quiz/review-summary")
         .then((r) => r.json())
         .then((d) => {
-          setReviewSubjects(d.subjects ?? []);
+          setReviewSubjects(reviewCandidates(d.subjects ?? []));
           setReviewTotalWrong(d.totalWrong ?? 0);
         })
         .finally(() => setReviewSummaryLoading(false));
@@ -256,7 +273,7 @@ function QuizInner({ mode }: { mode: Mode }) {
     [silentlyFetchOne],
   );
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (subjectOverride?: string) => {
     setPhase("loading");
     setError(null);
     setRecords([]);
@@ -281,7 +298,7 @@ function QuizInner({ mode }: { mode: Mode }) {
     }
 
     const qs = new URLSearchParams({ mode, count: String(mode === "review" ? REVIEW_COUNT : count) });
-    if (mode === "review") qs.set("subject", subject || "all");
+    if (mode === "review") qs.set("subject", subjectOverride ?? subject ?? "all");
     const res = await fetch(`/api/quiz?${qs}`);
     const d = await res.json();
     if (d.error) {
@@ -298,6 +315,16 @@ function QuizInner({ mode }: { mode: Mode }) {
     setIndex(0);
     setPhase("answering");
   }, [mode, subject, count, caseFilter, waitForNextSubjectQuestion]);
+
+  // ホーム画面の弱点マップから科目を指定して遷移してきた場合、選択画面を経由せず
+  // その科目の復習をそのまま開始する
+  useEffect(() => {
+    if (mode === "review" && initialSubject) {
+      setSubject(initialSubject);
+      void start(initialSubject);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, initialSubject]);
 
   const q = questions[index];
   const maxSelect = q?.question_type === "multi" ? 2 : 1;
@@ -521,7 +548,7 @@ function QuizInner({ mode }: { mode: Mode }) {
             </p>
             <div className="mt-4">
               <button
-                onClick={start}
+                onClick={() => void start()}
                 disabled={!subject}
                 className="min-h-12 w-full rounded-xl bg-indigo-600 px-5 py-3 font-medium text-white hover:bg-indigo-700 transition-colors disabled:opacity-40 sm:w-auto"
               >
@@ -560,18 +587,21 @@ function QuizInner({ mode }: { mode: Mode }) {
                   <p className="mb-2 text-sm font-medium text-stone-700">科目ごとに復習する</p>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     {reviewSubjects.map((s) => {
-                      // 苦手判定は間違えた問題数の絶対数ではなく正答率で行う
-                      // （出題数が多い科目ほど間違えた数も単純に増えるため）
+                      // ゴールまでの距離（あと何問でクリアか）で表示する。正答率は
+                      // 「これまで何問中何問正解したか」の実感が薄く、目標（弱点ゼロ）
+                      // までの距離のほうが次にすべきことが分かりやすいため
+                      const cleared = Math.max(0, s.everMissed - s.wrongCount);
+                      const clearedRate = s.everMissed > 0 ? cleared / s.everMissed : 0;
                       const style =
-                        s.accuracy < 50
+                        clearedRate < 0.34
                           ? "border-red-500 bg-red-50"
-                          : s.accuracy < 70
+                          : clearedRate < 0.67
                             ? "border-amber-500 bg-amber-50"
                             : "border-stone-300 bg-white";
                       const badgeStyle =
-                        s.accuracy < 50
+                        clearedRate < 0.34
                           ? "bg-red-600 text-white"
-                          : s.accuracy < 70
+                          : clearedRate < 0.67
                             ? "bg-amber-500 text-white"
                             : "bg-stone-200 text-stone-700";
                       return (
@@ -586,10 +616,10 @@ function QuizInner({ mode }: { mode: Mode }) {
                           <span className="text-sm font-medium text-stone-800">{s.subject}</span>
                           <span className="ml-2 flex shrink-0 flex-col items-end">
                             <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${badgeStyle}`}>
-                              直近正答率{s.accuracy}%
+                              残り{s.wrongCount}問
                             </span>
                             <span className="mt-1 text-xs text-stone-400">
-                              直近{s.total}問中{s.correct}問正解
+                              {s.everMissed}問中{cleared}問クリア
                             </span>
                           </span>
                         </button>
@@ -670,7 +700,7 @@ function QuizInner({ mode }: { mode: Mode }) {
                 fetch("/api/quiz/review-summary")
                   .then((r) => r.json())
                   .then((d) => {
-                    setReviewSubjects(d.subjects ?? []);
+                    setReviewSubjects(reviewCandidates(d.subjects ?? []));
                     setReviewTotalWrong(d.totalWrong ?? 0);
                   })
                   .finally(() => setReviewSummaryLoading(false));
@@ -846,8 +876,11 @@ function QuizInner({ mode }: { mode: Mode }) {
 function QuizRouter() {
   const params = useSearchParams();
   const mode = (params.get("mode") ?? "subject") as Mode;
-  if (mode === "mock") return <MockQuiz />;
-  return <QuizInner mode={mode} />;
+  if (mode === "mock") return <AllSubjectsQuiz />;
+  // ホーム画面の弱点マップから「この科目を今すぐ復習」で直接遷移してきた場合に使う
+  // （復習モードの科目選択画面を経由せず、その科目の復習をそのまま開始する）
+  const initialSubject = params.get("subject");
+  return <QuizInner mode={mode} initialSubject={initialSubject} />;
 }
 
 export default function QuizPage() {
