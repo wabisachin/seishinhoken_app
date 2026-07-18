@@ -47,6 +47,17 @@ export default function AdminPage() {
     }
   }, [authed]);
 
+  // 裏側の生成は継続的に進むため、開いたまま放置しても数字が動いているのが
+  // わかるよう、ストック・使用量は自動的に定期更新する
+  useEffect(() => {
+    if (!authed) return;
+    const id = setInterval(() => {
+      loadStock();
+      loadUsage();
+    }, 20_000);
+    return () => clearInterval(id);
+  }, [authed]);
+
   function loadStock() {
     setStockLoading(true);
     fetch("/api/admin/stock")
