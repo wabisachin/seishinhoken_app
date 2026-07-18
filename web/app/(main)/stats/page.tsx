@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 type Summary = {
@@ -73,7 +74,20 @@ export default function StatsPage() {
   if (error) return <p className="rounded bg-red-100 p-3 text-sm text-red-700">{error}</p>;
   if (!summary) return null;
   if (summary.subjectsPracticed === 0)
-    return <p className="text-stone-600">まだ解答記録がありません。演習すると成績が表示されます。</p>;
+    return (
+      <div className="space-y-3">
+        <p className="text-stone-600">
+          ここには実戦模試（本番と同じ形式・時間制限・一度も出題されていない問題だけで構成される模試）の
+          結果だけが表示されます。まだ実戦模試を受けていないので、成績はまだありません。
+        </p>
+        <Link
+          href="/full-mock"
+          className="inline-flex min-h-12 items-center rounded-xl bg-indigo-600 px-5 py-3 font-medium text-white transition-colors hover:bg-indigo-700"
+        >
+          実戦模試を受けてみる
+        </Link>
+      </div>
+    );
 
   // 科目別の月次推移テーブル: 直近数ヶ月 × 当月の苦手順で並べた科目
   const recentMonths = [...new Set(bySubjectMonthly.map((r) => r.month))].sort().slice(-MONTHLY_TABLE_MONTHS);
@@ -111,9 +125,12 @@ export default function StatsPage() {
       </section>
 
       {summary.thisMonthAttempts === 0 ? (
-        <p className="rounded-2xl bg-amber-50 p-4 text-sm text-amber-800">
-          今月はまだ解答記録がありません。演習すると今月の成績が表示されます。
-        </p>
+        <div className="space-y-2 rounded-2xl bg-amber-50 p-4 text-sm text-amber-800">
+          <p>今月はまだ実戦模試を受けていません。受けると今月の成績が表示されます。</p>
+          <Link href="/full-mock" className="font-medium underline underline-offset-2">
+            実戦模試を受けてみる
+          </Link>
+        </div>
       ) : (
         <>
           {byKindThisMonth.length > 0 && (

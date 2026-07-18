@@ -14,15 +14,18 @@ function addTo(map: Map<string, Bucket>, key: string, attempts: number, correct:
 }
 
 /**
- * 本人(profile='self')の成績を返す。試験対策としては「今どの位置にいるか」が
- * 重要で、全期間の累積値はさほど意味を持たないため、当月のデータを主役にし、
- * 月ごとの推移（全体・科目別）を副次情報として添える。
+ * 本人(profile='self')の成績を返す。分野別演習・ミニ模試・復習モードなど全モードを
+ * 合算した従来のsubject_statsではなく、実戦模試（exam_subject_stats、一度も出題
+ * されていない問題だけで構成される本番同形式の模試）のみを対象にする。既出問題の
+ * 解き直しが混ざると「未知の問題への対応力」という知りたい指標が読めなくなるため。
+ * 試験対策としては「今どの位置にいるか」が重要で、全期間の累積値はさほど意味を
+ * 持たないため、当月のデータを主役にし、月ごとの推移（全体・科目別）を副次情報として添える。
  */
 export async function GET() {
   try {
     const sb = supabase();
     const [{ data, error }, { data: taxSubjects }, { data: pastSubjects }] = await Promise.all([
-      sb.from("subject_stats").select("subject, day, attempts, correct").eq("profile", "self").order("day", { ascending: true }),
+      sb.from("exam_subject_stats").select("subject, day, attempts, correct").eq("profile", "self").order("day", { ascending: true }),
       sb.from("taxonomy").select("subject"),
       sb.from("past_questions").select("subject, kind"),
     ]);

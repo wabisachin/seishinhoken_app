@@ -8,6 +8,7 @@ type ErrorLog = { id: number; source: string; message: string; detail: string | 
 type UsageTotals = { inputTokens: number; cachedInputTokens: number; outputTokens: number; costUsd: number };
 type UsageByModel = UsageTotals & { provider: string; model: string };
 type SubjectStock = { subject: string; unserved: number; active: number; total: number };
+type ExamSubjectStock = SubjectStock & { target: number };
 
 export default function AdminPage() {
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -26,6 +27,7 @@ export default function AdminPage() {
   const [usageByModel, setUsageByModel] = useState<UsageByModel[]>([]);
   const [usageCallCount, setUsageCallCount] = useState(0);
   const [stock, setStock] = useState<SubjectStock[]>([]);
+  const [examPool, setExamPool] = useState<ExamSubjectStock[]>([]);
   const [stockCheckedAt, setStockCheckedAt] = useState<string | null>(null);
   const [stockLoading, setStockLoading] = useState(false);
   const [resetUnservedConfirm, setResetUnservedConfirm] = useState(false);
@@ -64,6 +66,7 @@ export default function AdminPage() {
       .then((r) => r.json())
       .then((d) => {
         if (d.stock) setStock(d.stock);
+        if (d.examPool) setExamPool(d.examPool);
         if (d.checkedAt) setStockCheckedAt(d.checkedAt);
       })
       .finally(() => setStockLoading(false));
@@ -249,6 +252,45 @@ export default function AdminPage() {
                     </td>
                     <td className="px-3 py-1.5 text-right">{s.active}</td>
                     <td className="px-3 py-1.5 text-right">{s.total}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-xl bg-white p-5 shadow">
+        <div className="flex items-center justify-between">
+          <h2 className="font-bold text-slate-700">実戦模試プールの在庫</h2>
+          <button onClick={loadStock} className="text-xs text-slate-400 hover:underline">
+            {stockLoading ? "更新中..." : "更新"}
+          </button>
+        </div>
+        <p className="mt-1 text-sm text-slate-500">
+          実戦模試専用の未消費ストック（一度も出題していない問題）。目標は「本番出題数×5回分」で、
+          受験のたびに消費されて通常プールへ合流するため、常にこの目標値を保つよう裏側で補充されます。
+        </p>
+        {examPool.length === 0 ? (
+          <p className="mt-3 text-sm text-slate-400">まだデータがありません。</p>
+        ) : (
+          <div className="mt-3 max-h-80 overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-slate-100 text-left">
+                <tr>
+                  <th className="px-3 py-1.5">科目</th>
+                  <th className="px-3 py-1.5 text-right">在庫</th>
+                  <th className="px-3 py-1.5 text-right">目標</th>
+                </tr>
+              </thead>
+              <tbody>
+                {examPool.map((s) => (
+                  <tr key={s.subject} className="border-t border-slate-100">
+                    <td className="px-3 py-1.5">{s.subject}</td>
+                    <td className={`px-3 py-1.5 text-right font-medium ${s.active < s.target ? "text-amber-600" : "text-slate-700"}`}>
+                      {s.active}
+                    </td>
+                    <td className="px-3 py-1.5 text-right">{s.target}</td>
                   </tr>
                 ))}
               </tbody>

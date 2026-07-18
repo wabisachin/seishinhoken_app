@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { isAdminRequest, checkPassword } from "@/lib/adminAuth";
-import { resetUnservedQuestions, topUpAllSubjects } from "@/lib/questionSupply";
+import { resetUnservedQuestions, topUpAllSubjects, topUpExamPool } from "@/lib/questionSupply";
 import { logError } from "@/lib/errorLog";
 
 // 削除後の全科目再生成をafter()側で走らせるため、この関数のタイムアウトを延ばしておく
 export const maxDuration = 300;
+// maxDurationより確実に短い時間で自発的に打ち切る（他のtopupフックと同じ理由）
+const RESET_TOPUP_TIME_BUDGET_MS = 270_000;
 
 /**
  * モデル/プロンプト変更時用。まだ誰にも出題していない問題（active・rejected、attempts無し）
@@ -22,7 +24,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "パスワードが違います" }, { status: 401 });
     }
     const { deleted } = await resetUnservedQuestions();
+    // resetUnservedQuestionsは通常プール・実戦模試プールの両方から未出題分を削除するため、
+    // 再構築も両方行う
     after(() => topUpAllSubjects().catch((e) => logError("reset-unserved-topup", e)));
+    after(() =>
+      topUpExamPool({ timeBudgetMs: RESET_TOPUP_TIME_BUDGET_MS }).catch((e) => logError("reset-unserved-exam-topup", e)),
+    );
     return NextResponse.json({ ok: true, deleted });
   } catch (e) {
     await logError("admin-reset-unserved", e);
