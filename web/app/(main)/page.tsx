@@ -134,7 +134,7 @@ function WeaknessRow({ s }: { s: ReviewSubject }) {
 
   const subtext =
     category === "needsReview"
-      ? `${s.everMissed}問中${cleared}問克服`
+      ? `解答数${s.total}問（${cleared}/${s.everMissed}問克服）`
       : category === "untouched"
         ? "まだ解いていません"
         : category === "lowConfidence"
@@ -189,9 +189,13 @@ function WeaknessMapSection({ title, subjects }: { title: string; subjects: Revi
   const SHOWN_CONFIDENT_OK = 3;
   const shownConfidentOk = confidentOk.slice(0, SHOWN_CONFIDENT_OK);
   const hiddenConfidentOkCount = confidentOk.length - shownConfidentOk.length;
+  const totalAnswered = subjects.reduce((sum, s) => sum + s.total, 0);
   return (
     <div>
-      <h3 className="mb-1.5 text-xs font-bold text-stone-500">{title}</h3>
+      <h3 className="mb-1.5 flex items-baseline gap-2 text-xs font-bold text-stone-500">
+        {title}
+        <span className="font-normal text-stone-400">計{totalAnswered}問解答</span>
+      </h3>
       <div className="space-y-1.5">
         {untouched.map((s) => (
           <WeaknessRow key={s.subject} s={s} />
@@ -282,6 +286,7 @@ export default function Dashboard() {
   // 食らうリスク）> 既知の弱点（対処法が明確）> 十分なデータがあってOKな科目（下に畳む）
   const commonSubjects = (reviewSubjects ?? []).filter((s) => SUBJECT_PART[s.subject] === "common");
   const specializedSubjects = (reviewSubjects ?? []).filter((s) => SUBJECT_PART[s.subject] === "specialized");
+  const totalAnsweredOverall = (reviewSubjects ?? []).reduce((sum, s) => sum + s.total, 0);
 
   return (
     <div className="space-y-6">
@@ -358,7 +363,10 @@ export default function Dashboard() {
       {/* 科目別弱点マップ */}
       {reviewSubjects && reviewSubjects.length > 0 && (
         <section className="rounded-2xl bg-white p-5 shadow-warm">
-          <h2 className="mb-1 font-bold text-indigo-700">科目別弱点マップ</h2>
+          <h2 className="mb-1 flex items-baseline gap-2 font-bold text-indigo-700">
+            科目別弱点マップ
+            <span className="text-xs font-normal text-stone-400">全体で計{totalAnsweredOverall}問解答</span>
+          </h2>
           <p className="mb-3 text-xs text-stone-400">
             未挑戦・データ不足の科目を優先表示。タップすると、既知の弱点は復習モード、
             未挑戦・データ不足の科目は科目別演習が始まります。
