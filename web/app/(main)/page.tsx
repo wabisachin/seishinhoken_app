@@ -187,11 +187,11 @@ function WeaknessRow({ s, medianTotal }: { s: ReviewSubject; medianTotal: number
           }}
           aria-label={thin ? "解答数が少ない科目の詳細を見る" : "詳細を見る"}
           title={thin ? "解答数がまだ少なく、まだ遭遇していない問題にも弱点が隠れている可能性があります" : undefined}
-          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs transition-colors ${
-            thin ? "bg-amber-400 font-bold text-white hover:bg-amber-500" : "text-stone-400 hover:bg-stone-100"
+          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full font-serif text-xs italic transition-colors ${
+            thin ? "bg-amber-400 font-bold text-white hover:bg-amber-500" : "border border-stone-300 text-stone-400 hover:bg-stone-100"
           }`}
         >
-          ⓘ
+          i
         </button>
       </div>
     </div>
