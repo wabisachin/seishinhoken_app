@@ -330,10 +330,7 @@ export default function Dashboard() {
       <section className="rounded-2xl bg-white p-5 shadow-warm">
         <h2 className="mb-3 font-bold text-indigo-700">実戦模試の実力</h2>
         {!examSummary || examSummary.subjectsPracticed === 0 ? (
-          <p className="text-sm text-stone-600">
-            ここには実戦模試（本番と同じ形式・時間制限・一度も出題されていない問題だけで構成される模試）の
-            結果だけが表示されます。まだ受験していないため、結果はまだありません。
-          </p>
+          <p className="text-sm text-stone-500">まだ受験していません。</p>
         ) : (
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
