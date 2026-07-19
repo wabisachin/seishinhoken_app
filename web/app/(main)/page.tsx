@@ -153,15 +153,33 @@ function WeaknessRow({ s, medianTotal }: { s: ReviewSubject; medianTotal: number
       <span className="shrink-0 rounded-full bg-green-100 px-2 py-0.5 text-xs font-bold text-green-700">OK</span>
     );
 
-  const clickable = category !== "confidentOk";
-  const linkHref =
-    category === "needsReview"
-      ? `/quiz?mode=review&subject=${encodeURIComponent(s.subject)}`
-      : `/quiz?mode=subject&subject=${encodeURIComponent(s.subject)}`;
+  // 解答数が少ない科目(thin)は、間違えたまま残っている問題があっても復習ではなく
+  // 科目別演習に誘導する。解答数が少ないうちは、既知の間違いを復習することより
+  // まず母数を増やしてまだ見つかっていない弱点を洗い出すことを優先すべきため
+  // （既知の弱点バッジ自体はそのまま表示し、事実は隠さない）
+  const goReview = category === "needsReview" && !thin;
+  const clickable = !(category === "confidentOk" && !thin);
+  const linkHref = goReview
+    ? `/quiz?mode=review&subject=${encodeURIComponent(s.subject)}`
+    : `/quiz?mode=subject&subject=${encodeURIComponent(s.subject)}`;
+
+  // 詳細ボタンは、科目行全体を包むLinkの「外」に置く（兄弟要素にする）。以前はLink(<a>)の
+  // 内側にbuttonを入れ子にしており、HTML的に無効な構造（インタラクティブ要素の中に
+  // インタラクティブ要素）だったため、特にタッチ環境でボタン側のタップがLinkのクリックとして
+  // 誤判定され、詳細を見たいだけなのに演習が始まってしまう不具合の原因になっていた
+  const linkContent = (
+    <>
+      <span className="w-28 shrink-0 truncate text-sm text-stone-700 sm:w-36">{s.subject}</span>
+      <div className="h-2 flex-1 overflow-hidden rounded-full bg-stone-100">
+        <div className={`h-full rounded-full ${barColor}`} style={{ width: `${barPercent}%` }} />
+      </div>
+      {badge}
+    </>
+  );
 
   const row = (
     <div
-      className={`flex items-center gap-2 rounded-xl p-2.5 transition-colors ${
+      className={`flex items-center gap-3 rounded-xl p-2.5 transition-colors ${
         clickable
           ? "bg-white shadow-warm-sm hover:bg-indigo-50"
           : isPerfect
@@ -169,43 +187,34 @@ function WeaknessRow({ s, medianTotal }: { s: ReviewSubject; medianTotal: number
             : "opacity-50"
       }`}
     >
-      <span className="w-28 shrink-0 truncate text-sm text-stone-700 sm:w-36">{s.subject}</span>
-      <div className="h-2 flex-1 overflow-hidden rounded-full bg-stone-100">
-        <div className={`h-full rounded-full ${barColor}`} style={{ width: `${barPercent}%` }} />
-      </div>
-      <div className="flex shrink-0 items-center gap-1">
-        {badge}
-        {/* 詳細ボタン。以前は「解答数が薄い」の！マークと別に並んでいて紛らわしく
-            誤タップも招いていたため1つに統合した。薄い場合は黄色で目立たせつつ、
-            押すと詳細（解答数・克服数・薄いことの説明）が開く、という一貫した動作にする */}
-        <button
-          type="button"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setShowDetail((v) => !v);
-          }}
-          aria-label={thin ? "解答数が少ない科目の詳細を見る" : "詳細を見る"}
-          title={thin ? "解答数がまだ少なく、まだ遭遇していない問題にも弱点が隠れている可能性があります" : undefined}
-          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full font-serif text-xs italic transition-colors ${
-            thin ? "bg-amber-400 font-bold text-white hover:bg-amber-500" : "border border-stone-300 text-stone-400 hover:bg-stone-100"
-          }`}
-        >
-          i
-        </button>
-      </div>
+      {clickable ? (
+        <Link href={linkHref} className="flex min-w-0 flex-1 items-center gap-2">
+          {linkContent}
+        </Link>
+      ) : (
+        <div className="flex min-w-0 flex-1 items-center gap-2">{linkContent}</div>
+      )}
+      {/* 詳細ボタン。以前は「解答数が薄い」の！マークと別に並んでいて紛らわしく
+          誤タップも招いていたため1つに統合した。薄い場合は黄色で目立たせつつ、
+          押すと詳細（解答数・克服数・薄いことの説明）が開く、という一貫した動作にする。
+          タップ判定を広めにとるため見た目より大きめのサイズにしている */}
+      <button
+        type="button"
+        onClick={() => setShowDetail((v) => !v)}
+        aria-label={thin ? "解答数が少ない科目の詳細を見る" : "詳細を見る"}
+        title={thin ? "解答数がまだ少なく、まだ遭遇していない問題にも弱点が隠れている可能性があります" : undefined}
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full font-serif text-sm italic transition-colors ${
+          thin ? "bg-amber-400 font-bold text-white hover:bg-amber-500" : "border border-stone-300 text-stone-400 hover:bg-stone-100"
+        }`}
+      >
+        i
+      </button>
     </div>
   );
 
   return (
     <div>
-      {clickable ? (
-        <Link href={linkHref} className="block">
-          {row}
-        </Link>
-      ) : (
-        row
-      )}
+      {row}
       {showDetail && (
         <div className="mt-1 space-y-0.5 rounded-lg bg-stone-50 p-2 text-xs leading-relaxed text-stone-600">
           <p>解答数: {s.total}問</p>
@@ -234,12 +243,13 @@ function WeaknessRow({ s, medianTotal }: { s: ReviewSubject; medianTotal: number
 // 全体と同じ考え方をセクション内で適用する
 function WeaknessMapSection({ title, subjects, medianTotal }: { title: string; subjects: ReviewSubject[]; medianTotal: number }) {
   if (subjects.length === 0) return null;
+  // 表示順は実際にタップした時の行き先と揃える: 科目別演習に誘導される科目
+  // （未挑戦・解答数が少ない科目）> 復習モードに誘導される科目（解答数は十分だが
+  // 間違えた問題が残っている）> OK（下に畳む）
   const untouched = subjects.filter((s) => categorize(s) === "untouched");
-  const rest = subjects.filter((s) => categorize(s) !== "untouched");
-  const thin = rest.filter((s) => isDataThin(s, medianTotal));
-  const solid = rest.filter((s) => !isDataThin(s, medianTotal));
-  const needsReview = solid.filter((s) => categorize(s) === "needsReview");
-  const confidentOk = solid.filter((s) => categorize(s) === "confidentOk");
+  const thinOthers = subjects.filter((s) => categorize(s) !== "untouched" && isDataThin(s, medianTotal));
+  const needsReview = subjects.filter((s) => categorize(s) === "needsReview" && !isDataThin(s, medianTotal));
+  const confidentOk = subjects.filter((s) => categorize(s) === "confidentOk" && !isDataThin(s, medianTotal));
   const SHOWN_CONFIDENT_OK = 3;
   const shownConfidentOk = confidentOk.slice(0, SHOWN_CONFIDENT_OK);
   const hiddenConfidentOkCount = confidentOk.length - shownConfidentOk.length;
@@ -254,7 +264,7 @@ function WeaknessMapSection({ title, subjects, medianTotal }: { title: string; s
         {untouched.map((s) => (
           <WeaknessRow key={s.subject} s={s} medianTotal={medianTotal} />
         ))}
-        {thin.map((s) => (
+        {thinOthers.map((s) => (
           <WeaknessRow key={s.subject} s={s} medianTotal={medianTotal} />
         ))}
         {needsReview.map((s) => (
@@ -423,9 +433,8 @@ export default function Dashboard() {
             <span className="text-xs font-normal text-stone-400">全体で計{totalAnsweredOverall}問解答</span>
           </h2>
           <p className="mb-3 text-xs text-stone-400">
-            未挑戦・解答数が少ない科目を優先表示。タップすると、解答数が少ない科目は
-            科目別演習、解答数が十分で間違えた問題が残っている科目は復習モードが始まります。
-            ⓘで詳細を表示できます。
+            未挑戦・解答数が少ない科目（ⓘが黄色）は科目別演習、解答数が十分で間違えた
+            問題が残っている科目は復習モードが始まります。ⓘで解答数・克服数を確認できます。
           </p>
           <div className="space-y-5">
             <WeaknessMapSection title="共通科目" subjects={commonSubjects} medianTotal={medianTotal} />
