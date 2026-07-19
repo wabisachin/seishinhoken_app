@@ -30,7 +30,13 @@ function cachedPrefix(text: string) {
 const questionSchema = z.object({
   question_type: z.enum(["single", "multi"]).describe("正答が1つならsingle、2つならmulti"),
   stem: z.string().describe("問題文。本番の国家試験の文体（〜として、適切なものを1つ選びなさい 等）"),
-  case_text: z.string().nullable().describe("事例問題の場合の事例文。通常問題ならnull"),
+  case_text: z
+    .string()
+    .nullable()
+    .describe(
+      "事例問題の場合の事例文の本文のみ。冒頭に「〔事例〕」等のラベルを付けないこと" +
+        "（画面表示側で自動的に付与されるため、含めると二重表示になる）。通常問題ならnull",
+    ),
   options: z
     .array(z.string())
     .describe(
@@ -47,7 +53,32 @@ const questionSchema = z.object({
     .array(z.number().int())
     .describe("正答番号の配列（1始まり）。直前のexplanationsでの吟味結果と完全に一致させること。singleは1つ、multiは2つ"),
   key_points: z.string().describe("この問題で押さえるべき関連知識のまとめ。周辺概念・混同しやすい用語の整理を含む学習用メモ"),
-  citation_chunk_ids: z.array(z.number().int()).describe("根拠として実際に使用したチャンクIDの配列"),
+  citation_chunk_ids: z.array(z.number().int()).describe("根拠として実際に使用したチャンクIDの配列（5つの選択肢の根拠の和集合）"),
+  option_citations: z
+    .array(
+      z.array(
+        z.object({
+          chunk_id: z.number().int(),
+          quote: z
+            .string()
+            .describe(
+              "この選択肢のexplanationsを書く際に根拠にした、チャンク本文中の一節を後から" +
+                "そのまま抜き出したもの（目安20〜60字）。あくまで既に確定した根拠チャンクの" +
+                "中から引用元を指し示すだけの作業であり、stem/options/explanationsの書き方を" +
+                "この抜き出しやすさのために変えてはならない（文体を根拠に寄せる、正答だけ" +
+                "本文そのままにする等は禁止）。本文と完全一致しないと表示で強調されないだけで" +
+                "問題自体は不正解にならないので、正確に抜き出せない場合は無理をせず空文字でよい",
+            ),
+        }),
+      ),
+    )
+    .describe(
+      "選択肢1〜5それぞれについて、その正誤判定(explanationsで書いた内容)の直接の根拠に使った" +
+        "チャンクidと、その本文中の該当箇所の引用。要素数5でoptions/explanationsと同じ順序" +
+        "（根拠にした具体的事実が無い選択肢は空配列でよい）。ここに登場するchunk_idは必ず" +
+        "citation_chunk_idsにも含めること。『どの根拠のどの部分がどの選択肢の正誤を決めて" +
+        "いるか』を利用者に示すために使う",
+    ),
 });
 
 const verifySchema = z.object({
@@ -335,7 +366,10 @@ async function fewShotExamples(subject: string, targetFormat: QFormat, n = 5): P
   return picks
     .map((q, i) => {
       const opts = (q.options as string[]).map((o, j) => `${j + 1} ${o}`).join("\n");
-      const caseText = q.case_text ? `〔事例〕${q.case_text}\n` : "";
+      // ラベルは「〔事例〕」ではなく別の記法にする（case_textスキーマの指示通りLLMが
+      // 「〔事例〕」を付けずに書けているかの手本を汚さないため。過去問データ自体には
+      // ラベルは含まれておらず、ここで一時的な表示用に付与しているだけ）
+      const caseText = q.case_text ? `（事例文）\n${q.case_text}\n\n` : "";
       return `【実際の過去問 例${i + 1}】\n${caseText}${q.stem}\n${opts}\n正答: ${(q.correct as number[]).join(", ")}`;
     })
     .join("\n\n");
@@ -410,11 +444,21 @@ export async function generateOneQuestion(
   2種類があるが、今回どちらにするかは下の「今回作成する問題の正答数」で指定するので必ずそれに従うこと
   （指定を無視して常に1つにすると、実際の過去問の約24%を占める択二形式を再現できない）
 - 正答は根拠テキストの記述から明確に導けること。根拠テキストに無い事実を使わない
-- 誤答選択肢の作り方（最重要。過去問132問（正答が判明している設問）の誤答を全数精査した
-  結果に基づく。実際の過去問には「文体で見分けられる誤答」はほぼ存在せず、正誤の判別には
-  必ずその分野の具体的な事実知識が要る。誤答は「読めば違和感がある」ものであってはならず、
-  「知らなければ正しく見える」ものでなければならない）:
-  - 明らかに的外れな選択肢は禁止。受験者が迷う「近いが違う」ものにする
+- 選択肢の作り方（最重要。過去問132問（正答が判明している設問）の全数精査に基づく。実際の
+  過去問では5つの選択肢の文の長さ・具体性・専門用語密度・言い切り方がほぼ揃っており、
+  「文体だけで見分けられる選択肢」はほぼ存在しない。正誤の判別には必ずその分野の具体的な
+  事実知識が要る。誤答は「読めば違和感がある」ものであってはならず、「知らなければ正しく
+  見える」ものでなければならない）:
+  - register parity（文体の対称性）を必ず守ること。正誤に関わらず5つの選択肢すべてを同じ
+    自信度・具体性・専門用語密度で書くこと:
+    - 正答だけを、反証されにくい余白や含みを残した安全な言い回し（「〜な場合もある」
+      「〜と考えられている」等のヘッジ表現）に逃がすのは禁止。正答も誤答と同じくらい
+      踏み込んだ、具体的で言い切った記述にすること。「一番歯切れが悪い/曖昧な選択肢が
+      正答」という当てずっぽうの必勝法が成立してはならない
+    - 逆に誤答だけを「常に」「一切」「〜ではない」のような極端な断定語で不自然に強めて
+      「いかにも怪しい」見た目にするのも禁止。根拠テキストが実際にそう書いている場合を
+      除き、断定的な語句を選択肢の正誤を目立たせる目的だけで追加・削除しないこと
+      （実際の過去問でもこの種の語句の登場頻度に正答・誤答間の有意な偏りは無い）
   - 誤答は必ず、根拠テキストまたは一般知識に基づく実在の別の事実に差し替えて作ること
     （4つの誤答にそれぞれ異なる差し替え方を使い、1つの型だけに偏らないこと）:
     a. 概念・用語・理論のすり替え（最頻出）: 同じ分野の別の概念・分類・理論の定義を、
@@ -425,24 +469,31 @@ export async function generateOneQuestion(
     d. 事例・場面問題では、別の技法・別のアプローチとして見れば正しい対応を、問われている
        技法・アプローチの対応であるかのように提示する（応答内容自体は専門職としてもっとも
        らしく、その技法特有のポイントだけがずれている）
-  - 各誤答は「なぜ誤りか」を根拠テキストまたは一般に確立した知識で具体的に説明できること
-- 文体を操作しないこと（重要）:
-  実際の過去問の誤答は、正答と同程度の具体性・専門用語密度・断定度で書かれた「事実として
-  誤っている記述」であり、言い回しの強さや丁寧さを人為的に揃えたり、逆にわざと変えたりする
-  必要は無い。むしろ次の点だけを守ること:
-  - 「のみ」「だけ」「一切」「必ず」等の断定的な語句を、誤答を作るためだけに根拠に無い形で
-    追加しないこと。ただし根拠テキストが実際にそう書いている場合は、正答・誤答どちらであれ
-    そのまま使ってよい（不自然に言い換える必要は無い。実際の過去問でもこの種の語句は
-    正答・誤答どちらにもまれにしか登場せず、登場頻度に有意な偏りも無い）
-  - 誤答は当てずっぽうの作文ではなく、実在する（教科書や一般知識に基づく）別の制度・人物・
-    概念・数値を使うこと。存在しない概念をでっち上げた誤答は、知識が無くても「聞いたことが
-    ないから違う」と分かってしまい問題として成立しない
+    根拠チャンクには「周辺トピックのテキスト」として、本体と意味的に近い別項目の実際の
+    教科書記述も渡されている。これは無関係な話ではなく、本体の次に近い実在の概念・制度・
+    人物なので、誤答を当てずっぽうで作文する代わりに、この周辺トピックの実際の記述を
+    差し替え材料として最優先で使うこと（存在しない概念のでっち上げは、知識が無くても
+    「聞いたことがないから違う」と分かってしまい問題として成立しない）
+  - 明らかに的外れな選択肢は禁止。受験者が迷う「近いが違う」ものにする
+  - 各選択肢は「なぜ正しいか／なぜ誤りか」を根拠テキストまたは一般に確立した知識で
+    具体的に説明できること（正答・誤答のどちらであっても「特に理由は無いがそれっぽい」
+    選択肢は禁止）
 - 手順は必ずこの順で行うこと（正答を先に決めてから理由を後付けしない）:
   1. まずexplanationsで選択肢1〜5それぞれを根拠テキストと照合し、正しいか誤りかを個別に吟味して書く
   2. その吟味結果だけを根拠にcorrectを決める（explanationsの結論とcorrectが食い違うことは絶対に許されない）
 - explanations は選択肢1〜5の順に5つ。学習に役立つよう具体的に書く
 - key_points はこの問題の周辺で覚えるべきことの整理（混同しやすい概念の対比など）
 - citation_chunk_ids には実際に根拠として使ったチャンクのid（整数）を入れる
+- option_citations は選択肢1〜5それぞれについて、その正誤判定に直接使ったチャンクidと、その
+  本文中の該当箇所の引用(quote)を対応する位置に入れる。「どの根拠のどの部分がどの選択肢の
+  正誤を決めたか」を受験者に示すために使うので、根拠が特定できる限りできるだけ具体的に
+  対応付けること。誤答であっても、根拠テキストの別の記述と矛盾する形で作った場合はその
+  根拠チャンクを入れる（誤答の根拠が一般知識のみで該当チャンクが無い場合のみ空配列でよい）。
+  これはstem/options/explanationsを全て書き終えた後に行う後付けの引用作業であり、逆に
+  この引用のしやすさのためにstem/options/explanationsの書き方・言い回しを変えてはならない
+  （根拠テキストに文体を寄せる、正答だけ本文そのままにする等は「文体を操作しないこと」の
+  ルールに反するため厳禁）。quoteが本文と正確に一致しない場合は表示で強調されないだけで
+  問題自体が不正解になるわけではないので、無理に一致させようとせず空文字でも構わない
 
 # 出題形式（過去問18科目・2回分264問の全数分析に基づく2軸4分類。「事例文の有無」と
 # 「選択肢が用語か説明文か」は独立した軸であり、両方を掛け合わせて考える必要がある。
@@ -519,6 +570,7 @@ ${pastExcerpts.length ? pastExcerpts.map((e, i) => `${i + 1}. ${e}...`).join("\n
     const formatProblems: string[] = [];
     if (q.options.length !== 5) formatProblems.push("選択肢が5つでない");
     if (q.explanations.length !== 5) formatProblems.push("解説が5つでない");
+    if (q.option_citations.length !== 5) formatProblems.push("選択肢ごとの根拠が5つでない");
     if (q.correct.length < 1 || q.correct.length > 2) formatProblems.push("正答数が1〜2でない");
     if (q.correct.some((c) => c < 1 || c > 5)) formatProblems.push("正答番号が1〜5の範囲外");
     if ((q.question_type === "single") !== (q.correct.length === 1)) formatProblems.push("question_typeと正答数が不一致");
@@ -569,17 +621,28 @@ ${optionsList}
     });
     await logUsage({ source: "verify", subject, provider: llm.provider, model: modelName, usage: verifyUsage });
 
-    const citedIds = new Set(q.citation_chunk_ids);
+    // option_citations（選択肢ごとの根拠チャンク＋該当箇所の引用）とcitation_chunk_ids（全体の
+    // 和集合）の和集合を実際に引用として残す。LLMがcitation_chunk_idsへの転記を忘れても、
+    // 選択肢側に挙げたidがあれば引用として表示できるようにするための冗長化
+    const optionChunkIds = q.option_citations.map((entries) => entries.map((e) => e.chunk_id));
+    const citedIds = new Set([...q.citation_chunk_ids, ...optionChunkIds.flat()]);
     const allChunks = [...main, ...neighbor];
     const citations = allChunks
       .filter((c) => citedIds.has(c.id))
-      .map((c) => ({
-        chunk_id: c.id,
-        book: c.book,
-        page_start: c.page_start,
-        page_end: c.page_end,
-        excerpt: c.content,
-      }));
+      .map((c) => {
+        const quotes = q.option_citations.flatMap((entries, idx) =>
+          entries.filter((e) => e.chunk_id === c.id).map((e) => ({ option: idx + 1, quote: e.quote })),
+        );
+        return {
+          chunk_id: c.id,
+          book: c.book,
+          page_start: c.page_start,
+          page_end: c.page_end,
+          excerpt: c.content,
+          supports: quotes.map((qq) => qq.option),
+          quotes,
+        };
+      });
     // 引用が空なら上位チャンクを引用として付ける
     if (citations.length === 0 && main.length > 0) {
       citations.push({
@@ -588,6 +651,8 @@ ${optionsList}
         page_start: main[0].page_start,
         page_end: main[0].page_end,
         excerpt: main[0].content,
+        supports: [],
+        quotes: [],
       });
     }
 

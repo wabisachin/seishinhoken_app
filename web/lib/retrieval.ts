@@ -67,28 +67,25 @@ export async function searchChunks(query: string, count = 8): Promise<RetrievedC
   return data as RetrievedChunk[];
 }
 
+const MAIN_CHUNK_COUNT = 8;
+const NEIGHBOR_CHUNK_COUNT = 6;
+
 /**
  * 出題対象のタクソノミー項目に対して根拠チャンクを取得する。
  * 本体チャンク + 誤答選択肢の材料になる周辺チャンクを返す。
+ *
+ * 誤答の材料（neighbor）は「本体(main)の次に意味的に近いチャンク」を使う。以前は
+ * 同科目のランダムな別トピック名で軽く検索していたが、選ばれたトピックが本体と
+ * 無関係なことが多く、「近いが違う」紛らわしい誤答の材料として弱かった（実際、生成
+ * ログを精査すると誤答が根拠薄弱な当てずっぽうになりがちだった）。同じHyDE埋め込み
+ * 検索の順位で本体のすぐ次に位置するチャンクは、定義上「本体と意味的に隣接するが
+ * 本体そのものではない」内容なので、概念・人物・制度のすり替えといった誤答を教科書の
+ * 実記述に基づいて作るための材料として質が高い。
  */
 export async function retrieveForItem(item: TaxonomyItem, llm?: Partial<LlmSettings>) {
   const passage = await hydePassage(item, llm);
-  const main = await searchChunks(passage, 8);
-  // 周辺トピック: 同科目の別の大項目名で軽く検索して「近いが違う」材料を得る
-  const sb = supabase();
-  const { data: siblings } = await sb
-    .from("taxonomy")
-    .select("id, subject, major, middle, minor")
-    .eq("subject", item.subject)
-    .neq("id", item.id)
-    .limit(50);
-  let neighbor: RetrievedChunk[] = [];
-  if (siblings && siblings.length > 0) {
-    const pick = siblings[Math.floor(Math.random() * siblings.length)] as TaxonomyItem;
-    const q = [pick.major, pick.middle, pick.minor].filter(Boolean).join(" ");
-    const found = await searchChunks(q, 3);
-    const mainIds = new Set(main.map((c) => c.id));
-    neighbor = found.filter((c) => !mainIds.has(c.id));
-  }
+  const pool = await searchChunks(passage, MAIN_CHUNK_COUNT + NEIGHBOR_CHUNK_COUNT);
+  const main = pool.slice(0, MAIN_CHUNK_COUNT);
+  const neighbor = pool.slice(MAIN_CHUNK_COUNT, MAIN_CHUNK_COUNT + NEIGHBOR_CHUNK_COUNT);
   return { passage, main, neighbor };
 }

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { Question } from "@/lib/types";
 import { getStoredProfile } from "@/lib/profile";
+import ExplanationList from "./ExplanationList";
 
 const SET_SIZE = 3;
 const STORAGE_KEY = "quiz_session_allsubjects_v1";
@@ -90,6 +91,7 @@ export default function AllSubjectsQuiz() {
   const [pendingResume, setPendingResume] = useState<Persisted | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [generatingAttempt, setGeneratingAttempt] = useState(0);
+  // 1画面に複数問(1セットぶん)を表示するため、キーは`${questionId}-${citationIndex}`にする
   // 科目ごとに1回だけ取得を開始し、結果(または進行中のPromise)をキャッシュする。
   // 演習が始まったらバックグラウンドのランナーが最後の科目まで順番に生成を進め続けるため、
   // ユーザーが今のセットを解いている間に何セットも先まで用意が進む。
@@ -406,20 +408,13 @@ export default function AllSubjectsQuiz() {
                     );
                   })}
                 </ol>
-                <ol className="mt-3 space-y-1.5">
-                  {q.explanations.map((ex, ei) => (
-                    <li key={ei} className="flex gap-2 text-sm leading-relaxed text-stone-600">
-                      <span
-                        className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
-                          q.correct.includes(ei + 1) ? "bg-green-600 text-white" : "bg-stone-300 text-stone-700"
-                        }`}
-                      >
-                        {ei + 1}
-                      </span>
-                      <span>{ex}</span>
-                    </li>
-                  ))}
-                </ol>
+                <ExplanationList
+                  explanations={q.explanations}
+                  correct={q.correct}
+                  citations={q.citations}
+                  keyPoints={q.key_points}
+                  variant="inline"
+                />
               </div>
             );
           })}

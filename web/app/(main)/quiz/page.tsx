@@ -4,9 +4,9 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import type { Mode, Question } from "@/lib/types";
-import { dedupeCitations } from "@/lib/citations";
 import { getStoredProfile } from "@/lib/profile";
 import AllSubjectsQuiz from "./AllSubjectsQuiz";
+import ExplanationList from "./ExplanationList";
 
 type Phase =
   | "resume-prompt"
@@ -126,7 +126,6 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
   const [error, setError] = useState<string | null>(null);
   const [pendingResume, setPendingResume] = useState<PersistedSubjectSession | null>(null);
   const [generatingAttempt, setGeneratingAttempt] = useState(0);
-  const [expandedCitation, setExpandedCitation] = useState<number | null>(null);
   const [reviewSubjects, setReviewSubjects] = useState<ReviewSubjectSummary[]>([]);
   const [reviewTotalWrong, setReviewTotalWrong] = useState(0);
   const [reviewSummaryLoading, setReviewSummaryLoading] = useState(true);
@@ -176,6 +175,16 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
+
+  // ホーム画面のおすすめアクションから科目を指定して遷移してきた場合の保険。
+  // useStateの初期値だけに頼ると、Suspense境界の下での初回マウントタイミングに
+  // よっては反映されないことがあるため、effectでも明示的に同期する
+  useEffect(() => {
+    if (mode === "subject" && initialSubject) {
+      setSubject(initialSubject);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, initialSubject]);
 
   function resumeSession() {
     if (!pendingResume) return;
@@ -366,7 +375,6 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
   }
 
   async function next() {
-    setExpandedCitation(null);
     if (mode === "subject") {
       if (records.length >= count) {
         clearSubjectSession();
@@ -584,7 +592,8 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
                   <p className="mt-1 text-sm text-stone-600">間違えた問題 {reviewTotalWrong}問から、間違えた回数が多いものほど出やすいランダム出題</p>
                 </button>
                 <div>
-                  <p className="mb-2 text-sm font-medium text-stone-700">科目ごとに復習する</p>
+                  <p className="mb-0.5 text-sm font-medium text-stone-700">科目ごとに復習する</p>
+                  <p className="mb-2 text-xs text-stone-400">※3問連続で正解すると克服したとみなします</p>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     {reviewSubjects.map((s) => {
                       // ゴールまでの距離（あと何問でクリアか）で表示する。正答率は
@@ -711,8 +720,8 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
           >
             もう一度
           </button>
-          <Link href="/stats" className="inline-flex min-h-12 items-center rounded-xl border border-indigo-600 px-5 py-3 font-medium text-indigo-700 transition-colors hover:bg-indigo-50">
-            成績を見る
+          <Link href="/" className="inline-flex min-h-12 items-center rounded-xl border border-indigo-600 px-5 py-3 font-medium text-indigo-700 transition-colors hover:bg-indigo-50">
+            ダッシュボードへ
           </Link>
         </div>
       </div>
@@ -799,61 +808,7 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
             {record.isCorrect ? "正解！" : `不正解（正答: ${q.correct.join("、")}）`}
           </div>
 
-          <div className="rounded-2xl bg-white p-5 shadow-warm">
-            <h3 className="mb-3 font-bold text-indigo-700">選択肢ごとの解説</h3>
-            <ol className="space-y-3">
-              {q.explanations.map((ex, i) => (
-                <li key={i} className="flex gap-2 text-sm leading-relaxed">
-                  <span
-                    className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
-                      q.correct.includes(i + 1) ? "bg-green-600 text-white" : "bg-stone-300 text-stone-700"
-                    }`}
-                  >
-                    {i + 1}
-                  </span>
-                  <span>{ex}</span>
-                </li>
-              ))}
-            </ol>
-          </div>
-
-          {q.key_points && (
-            <div className="rounded-2xl bg-amber-50 p-5 shadow-warm">
-              <h3 className="mb-2 font-bold text-amber-800">押さえておくべきポイント</h3>
-              <p className="whitespace-pre-wrap text-sm leading-relaxed">{q.key_points}</p>
-            </div>
-          )}
-
-          {q.citations && q.citations.length > 0 && (
-            <div className="rounded-2xl bg-white p-5 shadow-warm">
-              <h3 className="mb-2 font-bold text-stone-700">教科書の根拠</h3>
-              <ul className="space-y-2">
-                {dedupeCitations(q.citations).map((c, i) => {
-                  const expanded = expandedCitation === i;
-                  return (
-                    <li key={i} className="rounded-xl border border-stone-100">
-                      <button
-                        onClick={() => setExpandedCitation(expanded ? null : i)}
-                        className="flex min-h-10 w-full items-center gap-2 p-2 text-left text-sm text-stone-600"
-                      >
-                        <span className="text-indigo-300">・</span>
-                        <span className="flex-1">
-                          {c.book} p.{c.page_start}
-                          {c.page_end !== c.page_start ? `–${c.page_end}` : ""}
-                        </span>
-                        <span className="shrink-0 text-xs font-bold text-indigo-500">{expanded ? "－" : "＋"}</span>
-                      </button>
-                      {expanded && (
-                        <p className="whitespace-pre-wrap border-t border-stone-100 p-3 text-sm leading-relaxed text-stone-600">
-                          {c.excerpt}
-                        </p>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          )}
+          <ExplanationList explanations={q.explanations} correct={q.correct} citations={q.citations} keyPoints={q.key_points} />
 
           <div
             className="fixed inset-x-0 bottom-0 z-10 border-t border-stone-200 bg-white/95 p-4 backdrop-blur sm:static sm:border-0 sm:bg-transparent sm:p-0"

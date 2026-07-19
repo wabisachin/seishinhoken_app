@@ -6,6 +6,11 @@ export type Citation = {
   page_start: number;
   page_end: number;
   excerpt: string;
+  // このチャンクが根拠になっている選択肢番号（1始まり）。旧データには無いためoptional。
+  supports?: number[];
+  // 選択肢番号ごとの、excerpt内の該当箇所の一字一句引用（表示側で太字強調するために使う）。
+  // quoteが実際のexcerptに存在しない場合は強調せずそのまま表示する
+  quotes?: { option: number; quote: string }[];
 };
 
 export type Question = {

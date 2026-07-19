@@ -1,5 +1,6 @@
 import { generateObject } from "ai";
 import { z } from "zod";
+import { createHash } from "crypto";
 import { supabase } from "./supabase";
 import { getModel } from "./llm";
 import { getLlmSettings } from "./appSettings";
@@ -22,6 +23,11 @@ export type NextAction = {
 const STOCK_LOW_THRESHOLD = 3;
 // これ未満の科目が残っていれば「まだ全体像を触れていない」とみなす目安
 const UNTOUCHED_THRESHOLD = 3;
+// ホーム画面の科目別弱点マップ（web/app/(main)/page.tsx）と揃えた、正答率・克服判定の
+// 信頼性が低いとみなす解答数の目安（意図的に同じ値を独立に持つ。クライアント側の
+// page.tsxからはサーバー専用のこのファイルを直接importできないため。review-summary APIの
+// 直近件数の窓RECENT_WINDOW=30とも揃えている）
+const CONFIDENCE_THRESHOLD = 30;
 
 const NextActionSchema = z.object({
   action: z.enum(["subject", "mock", "exam"]),
@@ -39,15 +45,11 @@ function href(action: NextAction["action"], targetSubject: string | null): strin
 }
 
 /**
- * ホーム画面の「おすすめの次の一手」用コンテキストを集計し、LLMに1つだけ行動を選ばせる。
- * 合格条件（総得点60%以上 かつ 科目群①〜⑨すべてで1問以上正解）から逆算した学習戦略
- * ──ストックが薄ければ全科目演習で広げる、苦手が見えてきたら科目別演習で潰す、
- * 一定間隔・一定の弱点克服が進んだら実戦模試で力試しする──をLLMに提示し、
- * 状況に応じた短い理由とともに選ばせる。実行不可能な選択肢（実戦模試のストック未準備・
- * 月次上限到達）はそもそも候補に含めないため、LLMがそれを選ぶことは無いが、
- * 万一のフォーマット逸脱・API失敗に備えてコード側でも検証し、決定的なフォールバックを用意する。
+ * ホーム画面の「おすすめの次の一手」がLLMの判断材料にする状況一式。DB問い合わせのみで
+ * 組み立てられ、LLM呼び出しは含まない（stateHashだけを安く取得できるようにするため、
+ * computeNextActionと分離してある）。
  */
-export async function computeNextAction(): Promise<NextAction> {
+async function gatherState() {
   const sb = supabase();
   const [stockSnapshot, wrongProgress, wrongBySubject, readyRounds, roundsThisMonth, attemptedRows, latestExamRows] =
     await Promise.all([
@@ -67,12 +69,19 @@ export async function computeNextAction(): Promise<NextAction> {
         .limit(1),
     ]);
 
-  const attemptedSubjects = new Set(
-    ((attemptedRows.data ?? []) as unknown as { questions: { subject: string } | null }[])
-      .map((r) => r.questions?.subject)
-      .filter((s): s is string => !!s),
-  );
-  const untouchedSubjects = stockSnapshot.map((s) => s.subject).filter((s) => !attemptedSubjects.has(s));
+  const attemptCountBySubject = new Map<string, number>();
+  for (const r of (attemptedRows.data ?? []) as unknown as { questions: { subject: string } | null }[]) {
+    const subject = r.questions?.subject;
+    if (!subject) continue;
+    attemptCountBySubject.set(subject, (attemptCountBySubject.get(subject) ?? 0) + 1);
+  }
+  const untouchedSubjects = stockSnapshot.map((s) => s.subject).filter((s) => (attemptCountBySubject.get(s) ?? 0) === 0);
+  const lowConfidenceSubjects = stockSnapshot
+    .map((s) => s.subject)
+    .filter((s) => {
+      const c = attemptCountBySubject.get(s) ?? 0;
+      return c > 0 && c < CONFIDENCE_THRESHOLD;
+    });
   const thinSubjects = stockSnapshot.filter((s) => s.unserved < STOCK_LOW_THRESHOLD).map((s) => s.subject);
   const avgUnserved =
     stockSnapshot.length > 0 ? stockSnapshot.reduce((sum, s) => sum + s.unserved, 0) / stockSnapshot.length : 0;
@@ -114,9 +123,95 @@ export async function computeNextAction(): Promise<NextAction> {
   const examFeasible = remainingThisMonth > 0 && (readyRounds.common >= 1 || readyRounds.specialized >= 1);
   const knownSubjects = new Set(stockSnapshot.map((s) => s.subject));
 
+  // 実戦模試の月内ペース配分をLLMに判断させるための材料（月内に何日残っているか）。
+  // 月5回という枠は早い者勝ちで使い切ってよいものではなく、弱点克服の節目ごとに
+  // 計画的に消費すべきという方針をプロンプト側で明示する
+  const now = new Date();
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const daysLeftInMonth = daysInMonth - now.getDate();
+
+  // 「状態が変わったら再計算」用のフィンガープリント。科目ごとのストック・解答数・弱点数と、
+  // 今月の受験回数・直近の完了模試（id・完了時刻）を材料にする ── これらのどれか1つでも
+  // 変われば学習状況が実質的に変わったとみなせるため、時間経過ではなく変化そのものを
+  // トリガーにできる（時間で区切ると、短時間に何問も解いて最適解が変わっても反映されない
+  // 問題があるため採用しない）。
+  const subjects = [...stockSnapshot].sort((a, b) => a.subject.localeCompare(b.subject));
+  const fingerprintParts = subjects.map((s) => {
+    const wrong = wrongBySubject.get(s.subject);
+    const attempts = attemptCountBySubject.get(s.subject) ?? 0;
+    return `${s.subject}:${s.unserved}:${attempts}:${wrong?.currentWrong ?? 0}:${wrong?.everMissed ?? 0}`;
+  });
+  fingerprintParts.push(`rounds:${roundsThisMonth}`);
+  fingerprintParts.push(
+    `latestExam:${latestRow?.id ?? "none"}:${latestRow?.common_completed_at ?? ""}:${latestRow?.specialized_completed_at ?? ""}`,
+  );
+  const stateHash = createHash("sha256").update(fingerprintParts.join("|")).digest("hex").slice(0, 20);
+
+  return {
+    stockSnapshot,
+    wrongProgress,
+    untouchedSubjects,
+    lowConfidenceSubjects,
+    thinSubjects,
+    avgUnserved,
+    weakSubjects,
+    lastExamText,
+    weakestInFailedGroup,
+    remainingThisMonth,
+    examFeasible,
+    knownSubjects,
+    roundsThisMonth,
+    daysLeftInMonth,
+    stateHash,
+  };
+}
+
+/** LLMを呼ばずに状態のフィンガープリントだけを安く取得する。ホーム画面がこれで前回と比較し、変化が無ければLLM呼び出し自体を省略する。 */
+export async function getNextActionStateHash(): Promise<string> {
+  const state = await gatherState();
+  return state.stateHash;
+}
+
+/**
+ * ホーム画面の「おすすめの次の一手」用コンテキストを集計し、LLMに1つだけ行動を選ばせる。
+ * 合格条件（総得点60%以上 かつ 科目群①〜⑨すべてで1問以上正解）から逆算した学習戦略
+ * ──ストックが薄ければ全科目演習で広げる、苦手が見えてきたら科目別演習で潰す、
+ * 一定間隔・一定の弱点克服が進んだら実戦模試で力試しする──をLLMに提示し、
+ * 状況に応じた短い理由とともに選ばせる。実行不可能な選択肢（実戦模試のストック未準備・
+ * 月次上限到達）はそもそも候補に含めないため、LLMがそれを選ぶことは無いが、
+ * 万一のフォーマット逸脱・API失敗に備えてコード側でも検証し、決定的なフォールバックを用意する。
+ */
+export async function computeNextAction(): Promise<NextAction & { stateHash: string }> {
+  const state = await gatherState();
+  const {
+    stockSnapshot,
+    wrongProgress,
+    untouchedSubjects,
+    lowConfidenceSubjects,
+    thinSubjects,
+    avgUnserved,
+    weakSubjects,
+    lastExamText,
+    weakestInFailedGroup,
+    remainingThisMonth,
+    examFeasible,
+    knownSubjects,
+    roundsThisMonth,
+    daysLeftInMonth,
+    stateHash,
+  } = state;
+
   function fallback(): NextAction {
-    if (untouchedSubjects.length >= UNTOUCHED_THRESHOLD) {
-      return { action: "mock", targetSubject: null, reason: `まだ${untouchedSubjects.length}科目手つかずです`, href: href("mock", null) };
+    if (untouchedSubjects.length + lowConfidenceSubjects.length >= UNTOUCHED_THRESHOLD) {
+      if (untouchedSubjects.length > 0) {
+        return { action: "mock", targetSubject: null, reason: `まだ${untouchedSubjects.length}科目手つかずです`, href: href("mock", null) };
+      }
+      return {
+        action: "mock",
+        targetSubject: null,
+        reason: `解答数が少なく判断できない科目が${lowConfidenceSubjects.length}件あります`,
+        href: href("mock", null),
+      };
     }
     if (weakestInFailedGroup) {
       return {
@@ -159,11 +254,16 @@ ${feasibleActionsText}
 
 # 現在の状況
 - 全${stockSnapshot.length}科目中、まだ一度も演習していない科目: ${untouchedSubjects.length}科目${untouchedSubjects.length > 0 ? `（${untouchedSubjects.slice(0, 6).join("、")}）` : ""}
+- 解答数が少なく（${CONFIDENCE_THRESHOLD}問未満）苦手かどうかまだ判断できない科目: ${lowConfidenceSubjects.length}科目${lowConfidenceSubjects.length > 0 ? `（${lowConfidenceSubjects.slice(0, 6).join("、")}）` : ""}
 - 科目別の新規ストック（未出題の問題数）: 平均${avgUnserved.toFixed(1)}問/科目。特に少ない科目: ${thinSubjects.length > 0 ? thinSubjects.join("、") : "無し"}
 - 今も間違えたまま残っている問題: 全体で${wrongProgress.currentWrong}問（これまで間違えた${wrongProgress.everMissed}問中）
 - 苦手科目トップ3（残り問題が多い順）: ${weakSubjects.length > 0 ? weakSubjects.slice(0, 3).map((s) => `${s.subject}(残り${s.currentWrong}問)`).join("、") : "無し"}
 - 前回の実戦模試: ${lastExamText}
-- 実戦模試: ${examFeasible ? `受験可能（今月あと${remainingThisMonth}回）` : "現在は受験不可（問題ストック準備中、または今月の受験上限に到達）"}`;
+- 実戦模試: ${examFeasible ? `受験可能（今月すでに${roundsThisMonth}回受験、残り${remainingThisMonth}回。今月はあと${daysLeftInMonth}日）` : "現在は受験不可（問題ストック準備中、または今月の受験上限に到達）"}
+- 実戦模試は月5回までの限られた回数です。早い者勝ちで消費してよいものではなく、弱点克服が
+  ある程度進んだ節目ごとに計画的に受けるのが望ましいペースです。今月すでに何度も受験している、
+  もしくは前回受験からまだ日が浅い場合は、残り回数があっても演習（科目別演習・全科目演習）を
+  優先し、実戦模試は勧めないでください`;
 
   try {
     const llm = await getLlmSettings();
@@ -171,14 +271,20 @@ ${feasibleActionsText}
     const { object, usage } = await generateObject({ model, schema: NextActionSchema, prompt });
     await logUsage({ source: "next-action", provider: llm.provider, model: llm.model, usage });
 
-    if (object.action === "exam" && !examFeasible) return fallback();
+    if (object.action === "exam" && !examFeasible) return { ...fallback(), stateHash };
     if (object.action === "subject") {
-      if (!object.targetSubject || !knownSubjects.has(object.targetSubject)) return fallback();
-      return { action: "subject", targetSubject: object.targetSubject, reason: object.reason, href: href("subject", object.targetSubject) };
+      if (!object.targetSubject || !knownSubjects.has(object.targetSubject)) return { ...fallback(), stateHash };
+      return {
+        action: "subject",
+        targetSubject: object.targetSubject,
+        reason: object.reason,
+        href: href("subject", object.targetSubject),
+        stateHash,
+      };
     }
-    return { action: object.action, targetSubject: null, reason: object.reason, href: href(object.action, null) };
+    return { action: object.action, targetSubject: null, reason: object.reason, href: href(object.action, null), stateHash };
   } catch (e) {
     await logError("next-action", e);
-    return fallback();
+    return { ...fallback(), stateHash };
   }
 }

@@ -392,33 +392,36 @@ export async function topUpExamPool(opts: { timeBudgetMs?: number } = {}): Promi
   const { timeBudgetMs = Infinity } = opts;
   const start = Date.now();
   let generated = 0;
-  for (const { subject, questions } of EXAM_SUBJECT_COUNTS) {
-    if (Date.now() - start >= timeBudgetMs) break;
-    if (examTopUpInFlight.has(subject)) continue;
-    examTopUpInFlight.add(subject);
-    try {
+  // 全科目を1問ずつ順番に回すラウンドロビン方式（以前は科目ごとに目標達成まで使い切って
+  // から次の科目に進む方式だったため、却下が多い科目や配列前方の共通科目(午前)で時間を
+  // 使い切ってしまい、専門科目(午後)がいつまで経っても在庫ゼロのまま溜まらない問題が
+  // あった。ラウンドロビンなら1回の実行時間予算が短くても18科目に均等に進捗が付く）。
+  let anyRemaining = true;
+  while (anyRemaining && Date.now() - start < timeBudgetMs) {
+    anyRemaining = false;
+    for (const { subject, questions } of EXAM_SUBJECT_COUNTS) {
+      if (Date.now() - start >= timeBudgetMs) break;
+      if (examTopUpInFlight.has(subject)) continue;
       const target = questions * EXAM_STOCK_SESSIONS_AHEAD;
-      let active = await countExamPoolActive(subject);
-      while (active < target && Date.now() - start < timeBudgetMs) {
-        try {
-          const result = await generateOneQuestion(subject, { pool: "exam" });
-          generated++;
-          if (result.status === "active") {
-            active++;
-          } else {
-            await logError("generation-rejected", new Error("実戦模試用の問題が却下されました"), {
-              subject,
-              topic: result.topic,
-              problems: result.problems,
-            });
-          }
-        } catch (e) {
-          await logError("exam-topup", e, { subject });
-          break;
+      const active = await countExamPoolActive(subject);
+      if (active >= target) continue;
+      anyRemaining = true;
+      examTopUpInFlight.add(subject);
+      try {
+        const result = await generateOneQuestion(subject, { pool: "exam" });
+        generated++;
+        if (result.status !== "active") {
+          await logError("generation-rejected", new Error("実戦模試用の問題が却下されました"), {
+            subject,
+            topic: result.topic,
+            problems: result.problems,
+          });
         }
+      } catch (e) {
+        await logError("exam-topup", e, { subject });
+      } finally {
+        examTopUpInFlight.delete(subject);
       }
-    } finally {
-      examTopUpInFlight.delete(subject);
     }
   }
   return { generated };
