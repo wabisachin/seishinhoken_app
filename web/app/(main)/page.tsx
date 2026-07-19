@@ -80,6 +80,7 @@ function categorize(s: ReviewSubject): MapCategory {
 }
 
 function WeaknessRow({ s }: { s: ReviewSubject }) {
+  const [showInfo, setShowInfo] = useState(false);
   const category = categorize(s);
   const cleared = Math.max(0, s.everMissed - s.wrongCount);
   const clearedRate = s.everMissed > 0 ? cleared / s.everMissed : 0;
@@ -107,7 +108,21 @@ function WeaknessRow({ s }: { s: ReviewSubject }) {
     ) : category === "untouched" ? (
       <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">未挑戦</span>
     ) : category === "lowConfidence" ? (
-      <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">データ不足</span>
+      <span className="flex shrink-0 items-center gap-1">
+        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">データ不足</span>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setShowInfo((v) => !v);
+          }}
+          aria-label="データ不足の説明を見る"
+          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-amber-200 text-[10px] font-bold leading-none text-amber-800"
+        >
+          ？
+        </button>
+      </span>
     ) : (
       <span className="shrink-0 rounded-full bg-green-100 px-2 py-0.5 text-xs font-bold text-green-700">OK</span>
     );
@@ -143,9 +158,16 @@ function WeaknessRow({ s }: { s: ReviewSubject }) {
   }
   if (category === "untouched" || category === "lowConfidence") {
     return (
-      <Link href={`/quiz?mode=subject&subject=${encodeURIComponent(s.subject)}`} className="block">
-        {content}
-      </Link>
+      <div>
+        <Link href={`/quiz?mode=subject&subject=${encodeURIComponent(s.subject)}`} className="block">
+          {content}
+        </Link>
+        {showInfo && category === "lowConfidence" && (
+          <p className="mt-1 rounded-lg bg-amber-50 p-2 text-xs leading-relaxed text-amber-800">
+            今は間違えたまま残っている問題はありませんが、解答数が{s.total}/{CONFIDENCE_THRESHOLD}問とまだ少なく、実力を正しく判断できません。あと{Math.max(0, CONFIDENCE_THRESHOLD - s.total)}問解答すると解消されます。未挑戦の科目と同じく優先して演習すべき科目です。
+          </p>
+        )}
+      </div>
     );
   }
   return content;
