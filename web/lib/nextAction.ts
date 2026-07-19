@@ -8,7 +8,7 @@ import { logUsage } from "./usageLog";
 import { logError } from "./errorLog";
 import { getStockSnapshot, getExamReadyRounds } from "./questionSupply";
 import { getWrongStockProgress, getWrongStockProgressBySubject } from "./reviewStock";
-import { countRoundsThisMonth, computePartResult, computeVerdict, ExamAttemptRow } from "./examMode";
+import { countRoundsThisMonth, hasStartedRoundToday, computePartResult, computeVerdict, ExamAttemptRow } from "./examMode";
 import { EXAM_MONTHLY_LIMIT, EXAM_SUBJECT_GROUPS } from "./examFormat";
 
 export type NextAction = {
@@ -51,13 +51,14 @@ function href(action: NextAction["action"], targetSubject: string | null): strin
  */
 async function gatherState() {
   const sb = supabase();
-  const [stockSnapshot, wrongProgress, wrongBySubject, readyRounds, roundsThisMonth, attemptedRows, latestExamRows] =
+  const [stockSnapshot, wrongProgress, wrongBySubject, readyRounds, roundsThisMonth, startedToday, attemptedRows, latestExamRows] =
     await Promise.all([
       getStockSnapshot(),
       getWrongStockProgress(),
       getWrongStockProgressBySubject(),
       getExamReadyRounds(),
       countRoundsThisMonth("self"),
+      hasStartedRoundToday("self"),
       sb.from("attempts").select("questions!inner(subject)").eq("profile", "self"),
       sb
         .from("exam_attempts")
@@ -120,7 +121,8 @@ async function gatherState() {
   }
 
   const remainingThisMonth = Math.max(0, EXAM_MONTHLY_LIMIT - roundsThisMonth);
-  const examFeasible = remainingThisMonth > 0 && (readyRounds.common >= 1 || readyRounds.specialized >= 1);
+  const examFeasible =
+    remainingThisMonth > 0 && !startedToday && (readyRounds.common >= 1 || readyRounds.specialized >= 1);
   const knownSubjects = new Set(stockSnapshot.map((s) => s.subject));
 
   // 実戦模試の月内ペース配分をLLMに判断させるための材料（月内に何日残っているか）。
@@ -161,6 +163,7 @@ async function gatherState() {
     examFeasible,
     knownSubjects,
     roundsThisMonth,
+    startedToday,
     daysLeftInMonth,
     stateHash,
   };
@@ -197,6 +200,7 @@ export async function computeNextAction(): Promise<NextAction & { stateHash: str
     examFeasible,
     knownSubjects,
     roundsThisMonth,
+    startedToday,
     daysLeftInMonth,
     stateHash,
   } = state;
@@ -259,7 +263,7 @@ ${feasibleActionsText}
 - 今も間違えたまま残っている問題: 全体で${wrongProgress.currentWrong}問（これまで間違えた${wrongProgress.everMissed}問中）
 - 苦手科目トップ3（残り問題が多い順）: ${weakSubjects.length > 0 ? weakSubjects.slice(0, 3).map((s) => `${s.subject}(残り${s.currentWrong}問)`).join("、") : "無し"}
 - 前回の実戦模試: ${lastExamText}
-- 実戦模試: ${examFeasible ? `受験可能（今月すでに${roundsThisMonth}回受験、残り${remainingThisMonth}回。今月はあと${daysLeftInMonth}日）` : "現在は受験不可（問題ストック準備中、または今月の受験上限に到達）"}
+- 実戦模試: ${examFeasible ? `受験可能（今月すでに${roundsThisMonth}回受験、残り${remainingThisMonth}回。今月はあと${daysLeftInMonth}日）` : startedToday ? "今日は既に新しい回を開始済み（1日1回まで。明日また受験可能）" : "現在は受験不可（問題ストック準備中、または今月の受験上限に到達）"}
 - 実戦模試は月5回までの限られた回数です。早い者勝ちで消費してよいものではなく、弱点克服が
   ある程度進んだ節目ごとに計画的に受けるのが望ましいペースです。今月すでに何度も受験している、
   もしくは前回受験からまだ日が浅い場合は、残り回数があっても演習（科目別演習・全科目演習）を

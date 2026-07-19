@@ -16,6 +16,7 @@ type ExamState = {
   remainingThisMonth: number;
   commonReady: boolean;
   specializedReady: boolean;
+  canStartNewRound: boolean;
 };
 type Answer = { selected: number[]; isCorrect: boolean };
 type SubjectScore = { subject: string; correct: number; total: number };
@@ -297,6 +298,16 @@ export default function ExamQuiz() {
           <h1 className="text-xl font-bold">実戦模試</h1>
           <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-800">
             今月の受験回数（月5回まで）の上限に達しました。来月になるとまた受けられるようになります。
+          </p>
+        </div>
+      );
+    }
+    if (!state.canStartNewRound && !state.hasInProgress) {
+      return (
+        <div className="space-y-4">
+          <h1 className="text-xl font-bold">実戦模試</h1>
+          <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-800">
+            実戦模試は実力測定のため1日1回までです。今日はもう受験済みなので、日をまたぐとまた新しい回を始められます。
           </p>
         </div>
       );

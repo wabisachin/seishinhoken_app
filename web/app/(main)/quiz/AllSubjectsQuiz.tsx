@@ -166,7 +166,7 @@ export default function AllSubjectsQuiz() {
         if (q) firstSet.push(q);
       }
       if (firstSet.length === 0) {
-        setError("問題プールが空です。科目別演習で問題を生成してから試してください。");
+        setError("出題できる問題がまだありません。科目別演習で問題を生成してから試してください。");
         setPhase("empty");
         return;
       }

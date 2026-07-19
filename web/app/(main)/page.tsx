@@ -196,7 +196,7 @@ export default function Dashboard() {
         setEverMissed(d.everMissed ?? 0);
         setTotalWrong(d.totalWrong ?? 0);
       })
-      .catch((e) => setError(String(e)));
+      .catch(() => setError("データの読み込みに失敗しました。時間をおいて再度お試しください。"));
 
     fetch("/api/stats")
       .then((r) => r.json())
@@ -204,7 +204,7 @@ export default function Dashboard() {
         if (d.error) throw new Error(d.error);
         setExamSummary(d.summary);
       })
-      .catch((e) => setError(String(e)));
+      .catch(() => setError("データの読み込みに失敗しました。時間をおいて再度お試しください。"));
 
     fetch("/api/exam/state")
       .then((r) => r.json())

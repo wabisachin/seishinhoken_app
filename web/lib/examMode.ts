@@ -47,6 +47,19 @@ export async function countRoundsThisMonth(profile = "self"): Promise<number> {
 }
 
 /**
+ * 実戦模試は一日に何度も受けても実力測定として意味が無いため、新しい回(exam_attempts)を
+ * 開始できるのは1日1回までに制限する（月5回の上限とは別軸のガード）。日付比較は
+ * countRoundsThisMonthと同じ「文字列の年月日比較」方式でタイムゾーンのずれを避ける。
+ */
+export async function hasStartedRoundToday(profile = "self"): Promise<boolean> {
+  const sb = supabase();
+  const { data, error } = await sb.from("exam_attempts").select("created_at").eq("profile", profile);
+  if (error) throw new Error(error.message);
+  const today = new Date().toISOString().slice(0, 10);
+  return (data ?? []).some((r) => String(r.created_at).slice(0, 10) === today);
+}
+
+/**
  * 指定パートの出題を実戦模試専用ストック（pool='exam', status='active'）から科目ごとの
  * 本番出題数だけ確保し、即座にpool='general'へ更新する（=消費・通常プールへの合流を予約時点で
  * 確定させる）。いずれかの科目で在庫が足りない場合は何も更新せずnullを返す

@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { logError } from "@/lib/errorLog";
-import { getCurrentExamAttempt, reserveQuestionsForPart, countRoundsThisMonth, ExamAttemptRow } from "@/lib/examMode";
+import {
+  getCurrentExamAttempt,
+  reserveQuestionsForPart,
+  countRoundsThisMonth,
+  hasStartedRoundToday,
+  ExamAttemptRow,
+} from "@/lib/examMode";
 import { EXAM_MONTHLY_LIMIT, EXAM_TIME_LIMIT_SECONDS, ExamPart } from "@/lib/examFormat";
 import { topUpExamPool } from "@/lib/questionSupply";
 
@@ -45,6 +51,14 @@ export async function POST(req: NextRequest) {
       const roundsThisMonth = await countRoundsThisMonth("self");
       if (roundsThisMonth >= EXAM_MONTHLY_LIMIT) {
         return NextResponse.json({ error: "今月の受験回数の上限に達しています" }, { status: 400 });
+      }
+      // 実力測定として意味を持たせるため、新しい回の開始は1日1回までに制限する
+      // （既に開始済みの回で残りのパートを受ける分には制限しない）
+      if (await hasStartedRoundToday("self")) {
+        return NextResponse.json(
+          { error: "実戦模試は1日1回までです。今日開始した回は既にあります。日をまたぐとまた新しい回を始められます" },
+          { status: 400 },
+        );
       }
       const { data: inserted, error } = await sb.from("exam_attempts").insert({ profile: "self" }).select("*").single();
       if (error) throw new Error(error.message);
