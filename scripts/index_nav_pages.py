@@ -97,15 +97,50 @@ def ensure_bucket(sb) -> None:
     print(f"created storage bucket: {BUCKET}")
 
 
+def upload_with_retry(sb, storage_path: str, data: bytes, attempts: int = 5) -> None:
+    for attempt in range(attempts):
+        try:
+            sb.storage.from_(BUCKET).upload(
+                storage_path, data, file_options={"content-type": "image/jpeg", "upsert": "true"}
+            )
+            return
+        except Exception:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(5 * (attempt + 1))  # Storage側の一時的な503対策
+
+
+def reupload_images_only(sb) -> None:
+    """タイトル抽出・埋め込みはそのままに、ページ画像だけ再アップロードする
+    （画像パスは変わらないため、DB(nav_pages.image_path)の更新は不要。x-upsertで上書き）。"""
+    for slug_dir in sorted(p for p in NAV_DIR.iterdir() if p.is_dir()):
+        slug = slug_dir.name
+        images = sorted(slug_dir.glob("*.jpg"))
+        for img_path in tqdm(images, desc=f"reupload {slug}"):
+            storage_path = f"{slug}/{img_path.name}"
+            upload_with_retry(sb, storage_path, img_path.read_bytes())
+        print(f"done: {slug} ({len(images)} images reuploaded)")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=None, help="各冊で処理するページ数の上限(検証用)")
+    parser.add_argument(
+        "--images-only",
+        action="store_true",
+        help="タイトル抽出・埋め込みをやり直さず、画像だけ再アップロードする(解像度変更時など)",
+    )
     args = parser.parse_args()
+
+    sb = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_ROLE_KEY"])
+    ensure_bucket(sb)
+
+    if args.images_only:
+        reupload_images_only(sb)
+        return
 
     oa = openai.OpenAI()
     vo = voyageai.Client()
-    sb = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_ROLE_KEY"])
-    ensure_bucket(sb)
 
     for jsonl in sorted(NAV_DIR.glob("*.jsonl")):
         slug = jsonl.stem

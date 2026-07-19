@@ -30,8 +30,8 @@ SRC = ROOT / "text_pdf"
 OUT = ROOT / "data" / "nav_pages"
 OUT.mkdir(parents=True, exist_ok=True)
 
-RENDER_DPI = 120
-JPEG_QUALITY = 75
+RENDER_DPI = 200
+JPEG_QUALITY = 85
 TITLE_CANDIDATE_COUNT = 12
 RAW_WORD_LIMIT = 150
 
