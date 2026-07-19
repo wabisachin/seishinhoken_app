@@ -21,9 +21,14 @@ type ExamSummary = {
   thisMonthAccuracy: number;
   subjectsPracticed: number;
 };
-type NextAction = { action: "subject" | "mock" | "exam"; targetSubject: string | null; reason: string; href: string };
+type NextAction = { action: "subject" | "review" | "mock" | "exam"; targetSubject: string | null; reason: string; href: string };
 
-const ACTION_LABEL: Record<NextAction["action"], string> = { subject: "科目別演習", mock: "全科目演習", exam: "実戦模試" };
+const ACTION_LABEL: Record<NextAction["action"], string> = {
+  subject: "科目別演習",
+  review: "復習モード",
+  mock: "全科目演習",
+  exam: "実戦模試",
+};
 
 // 「おすすめの次の一手」はLLM呼び出しを伴うため、ホーム画面を開くたび（単なるリロードも
 // 含む）に毎回呼ぶとトークンを浪費する。かといって時間で区切ると、短時間に何問も解いて
@@ -281,7 +286,45 @@ function WeaknessMapSection({ title, subjects, medianTotal }: { title: string; s
   );
 }
 
+type PendingResume = { href: string; label: string } | null;
+
+// 全科目演習・科目別演習はどちらも独自にlocalStorageへ進行中セッションを保存していて
+// （それぞれのページ内で「続きから再開しますか？」を出す）、ホーム画面はそれとは別に
+// 「前回途中だったものがある」こと自体をバナーで気づかせる役割を持つ。判定ロジックは
+// 各ページの「unfinished」判定と揃える（キーやフィールド名が変わったら両方直すこと）
+function checkPendingResume(): PendingResume {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem("quiz_session_allsubjects_v1");
+    if (raw) {
+      const p = JSON.parse(raw) as { answers?: Record<string, unknown>; subjectOrder?: string[] };
+      const answered = Object.keys(p.answers ?? {}).length;
+      const total = (p.subjectOrder ?? []).length;
+      if (total > 0 && answered < total) {
+        return { href: "/quiz?mode=mock", label: `全科目演習（${answered}/${total}問まで解答済み）` };
+      }
+    }
+  } catch {
+    // 壊れたデータは無視する
+  }
+  try {
+    const raw = localStorage.getItem("quiz_session_subject_v1");
+    if (raw) {
+      const p = JSON.parse(raw) as { records?: unknown[]; count?: number; subject?: string };
+      const answered = (p.records ?? []).length;
+      const count = p.count ?? 0;
+      if (count > 0 && answered < count && p.subject) {
+        return { href: "/quiz?mode=subject", label: `科目別演習「${p.subject}」（${answered}/${count}問まで解答済み）` };
+      }
+    }
+  } catch {
+    // 壊れたデータは無視する
+  }
+  return null;
+}
+
 export default function Dashboard() {
+  const [pendingResume, setPendingResume] = useState<PendingResume>(null);
   const [reviewSubjects, setReviewSubjects] = useState<ReviewSubject[] | null>(null);
   const [everMissed, setEverMissed] = useState(0);
   const [totalWrong, setTotalWrong] = useState(0);
@@ -290,6 +333,10 @@ export default function Dashboard() {
   const [nextAction, setNextAction] = useState<NextAction | null>(null);
   const [nextActionLoading, setNextActionLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setPendingResume(checkPendingResume());
+  }, []);
 
   useEffect(() => {
     const cached = loadCachedNextAction();
@@ -355,6 +402,19 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      {pendingResume && (
+        <section className="rounded-2xl border-2 border-amber-400 bg-amber-50 p-4 shadow-warm">
+          <p className="text-sm font-bold text-amber-800">前回途中だった演習があります</p>
+          <p className="mt-0.5 text-sm text-amber-700">{pendingResume.label}</p>
+          <Link
+            href={pendingResume.href}
+            className="mt-3 inline-flex min-h-11 items-center rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-amber-600"
+          >
+            続きから始めますか？
+          </Link>
+        </section>
+      )}
+
       {!nextActionLoading && nextAction && (
         <section className="rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-600 p-5 text-white shadow-warm">
           <p className="text-xs font-medium text-indigo-100">おすすめの次の一手</p>

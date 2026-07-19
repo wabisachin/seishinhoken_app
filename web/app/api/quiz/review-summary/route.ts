@@ -18,7 +18,7 @@ import { getStockSnapshot, SUBJECT_TARGET } from "@/lib/questionSupply";
 export async function GET() {
   try {
     const [{ data: attempts, error }, allSubjects, stockSnapshot] = await Promise.all([
-      supabase().from("attempts").select("questions!inner(subject)").eq("profile", "self"),
+      supabase().from("attempts").select("question_id, questions!inner(subject)").eq("profile", "self"),
       listSubjects(),
       getStockSnapshot(),
     ]);
@@ -31,14 +31,19 @@ export async function GET() {
     const [progress, progressBySubject] = await Promise.all([getWrongStockProgress(), getWrongStockProgressBySubject()]);
     const totalWrong = progress.currentWrong;
 
-    // 解答数は全期間の総数（窓で区切らない）。正答率は使わないため区切る必要が無く、
-    // 「これまで何問解いたか」という素朴な累計こそがユーザーに見せたい数字のため
-    const totalBySubject = new Map<string, number>();
+    // 解答数は「これまでに出題された、重複の無い問題の数」（窓で区切らない全期間）。
+    // attemptsの行数をそのまま数えると、復習モードで同じ問題を3問連続正解するまで
+    // 何度も解き直した分だけ水増しされてしまい、「どれだけの問題数に触れたか」という
+    // 本来知りたい指標とズレるため、question_idの重複を除いてから数える
+    const questionIdsBySubject = new Map<string, Set<number>>();
     for (const a of attempts ?? []) {
       const subject = (a.questions as unknown as { subject: string } | null)?.subject;
       if (!subject) continue;
-      totalBySubject.set(subject, (totalBySubject.get(subject) ?? 0) + 1);
+      const set = questionIdsBySubject.get(subject) ?? new Set<number>();
+      set.add(a.question_id as number);
+      questionIdsBySubject.set(subject, set);
     }
+    const totalBySubject = new Map<string, number>([...questionIdsBySubject.entries()].map(([s, set]) => [s, set.size]));
     const activeBySubject = new Map(stockSnapshot.map((s) => [s.subject, s.active]));
 
     const subjects = allSubjects

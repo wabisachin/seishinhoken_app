@@ -1,16 +1,26 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { clearStoredProfile, getStoredProfile, setStoredProfile, type UserProfile } from "@/lib/profile";
 
 export default function ProfileGate({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null | "checking">("checking");
   const pathname = usePathname();
+  const router = useRouter();
 
   useEffect(() => {
     setProfile(getStoredProfile());
   }, []);
+
+  // 応援する人にとっての「ホーム」は成績ページ。ブックマークやPWAのアイコンなど、
+  // ナビのタブを経由せずに直接「/」へ来た場合（アプリを閉じて開き直した時など）に
+  // 本人向けダッシュボードが一瞬でも見えてしまわないよう、成績ページへ流す
+  useEffect(() => {
+    if (profile === "guardian" && pathname === "/") {
+      router.replace("/stats");
+    }
+  }, [profile, pathname, router]);
 
   function choose(p: UserProfile) {
     setStoredProfile(p);
@@ -27,6 +37,7 @@ export default function ProfileGate({ children }: { children: React.ReactNode })
   }
 
   if (profile === "checking") return null;
+  if (profile === "guardian" && pathname === "/") return null;
 
   if (profile === null) {
     return (

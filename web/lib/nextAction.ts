@@ -12,7 +12,7 @@ import { countRoundsThisMonth, hasStartedRoundToday, computePartResult, computeV
 import { EXAM_MONTHLY_LIMIT, EXAM_SUBJECT_GROUPS } from "./examFormat";
 
 export type NextAction = {
-  action: "subject" | "mock" | "exam";
+  action: "subject" | "review" | "mock" | "exam";
   targetSubject: string | null;
   reason: string;
   href: string;
@@ -31,17 +31,18 @@ const UNTOUCHED_THRESHOLD = 3;
 const CONFIDENCE_THRESHOLD = 30;
 
 const NextActionSchema = z.object({
-  action: z.enum(["subject", "mock", "exam"]),
+  action: z.enum(["subject", "review", "mock", "exam"]),
   targetSubject: z
     .string()
     .nullable()
-    .describe("actionがsubjectの場合のみ、提示された候補の中から科目名を1つそのまま指定する。それ以外はnull"),
+    .describe("actionがsubjectまたはreviewの場合のみ、提示された候補の中から科目名を1つそのまま指定する。それ以外はnull"),
   reason: z.string().describe("40字以内、1文。具体的な数字を1つ含めること。決まり文句の言い換えではなく状況に即した理由にする"),
 });
 
 function href(action: NextAction["action"], targetSubject: string | null): string {
   if (action === "mock") return "/quiz?mode=mock";
   if (action === "exam") return "/full-mock";
+  if (action === "review") return `/quiz?mode=review${targetSubject ? `&subject=${encodeURIComponent(targetSubject)}` : ""}`;
   return `/quiz?mode=subject${targetSubject ? `&subject=${encodeURIComponent(targetSubject)}` : ""}`;
 }
 
@@ -69,7 +70,7 @@ async function gatherState() {
     getExamReadyRounds(),
     countRoundsThisMonth("self"),
     hasStartedRoundToday("self"),
-    sb.from("attempts").select("questions!inner(subject)").eq("profile", "self"),
+    sb.from("attempts").select("question_id, questions!inner(subject)").eq("profile", "self"),
     sb
       .from("exam_attempts")
       .select("*")
@@ -81,12 +82,19 @@ async function gatherState() {
     sb.from("attempts").select("is_correct, questions!inner(subject)").eq("profile", "self").eq("mode", "exam"),
   ]);
 
-  const attemptCountBySubject = new Map<string, number>();
-  for (const r of (attemptedRows.data ?? []) as unknown as { questions: { subject: string } | null }[]) {
+  // 「解答数」は重複の無い問題数（同じ問題を復習で何度も解き直した分は水増ししない）。
+  // ホーム画面の弱点マップ・review-summary APIと同じ考え方
+  const questionIdsBySubject = new Map<string, Set<number>>();
+  for (const r of (attemptedRows.data ?? []) as unknown as { question_id: number; questions: { subject: string } | null }[]) {
     const subject = r.questions?.subject;
     if (!subject) continue;
-    attemptCountBySubject.set(subject, (attemptCountBySubject.get(subject) ?? 0) + 1);
+    const set = questionIdsBySubject.get(subject) ?? new Set<number>();
+    set.add(r.question_id);
+    questionIdsBySubject.set(subject, set);
   }
+  const attemptCountBySubject = new Map<string, number>(
+    [...questionIdsBySubject.entries()].map(([s, set]) => [s, set.size]),
+  );
   const untouchedSubjects = stockSnapshot.map((s) => s.subject).filter((s) => (attemptCountBySubject.get(s) ?? 0) === 0);
   const lowConfidenceSubjects = stockSnapshot
     .map((s) => s.subject)
@@ -98,8 +106,25 @@ async function gatherState() {
   const avgUnserved =
     stockSnapshot.length > 0 ? stockSnapshot.reduce((sum, s) => sum + s.unserved, 0) / stockSnapshot.length : 0;
 
+  // ホーム画面の弱点マップ（web/app/(main)/page.tsx）と同じ「解答数が薄い」判定
+  // （絶対的な最低ライン、または全科目の解答数の中央値の半分以下）。苦手科目トップ3の
+  // 中で解答数が薄い科目は、復習ではなく科目別演習を勧めるべきかどうかの判定に使う
+  const sortedAttemptTotals = stockSnapshot.map((s) => attemptCountBySubject.get(s.subject) ?? 0).sort((a, b) => a - b);
+  const mid = Math.floor(sortedAttemptTotals.length / 2);
+  const medianAttempts =
+    sortedAttemptTotals.length === 0
+      ? 0
+      : sortedAttemptTotals.length % 2 === 0
+        ? (sortedAttemptTotals[mid - 1] + sortedAttemptTotals[mid]) / 2
+        : sortedAttemptTotals[mid];
+  function isThinSubject(subject: string): boolean {
+    const c = attemptCountBySubject.get(subject) ?? 0;
+    if (c === 0) return false;
+    return c < CONFIDENCE_THRESHOLD || c <= medianAttempts / 2;
+  }
+
   const weakSubjects = [...wrongBySubject.entries()]
-    .map(([subject, p]) => ({ subject, ...p }))
+    .map(([subject, p]) => ({ subject, ...p, thin: isThinSubject(subject) }))
     .filter((s) => s.currentWrong > 0)
     .sort((a, b) => b.currentWrong / Math.max(1, b.everMissed) - a.currentWrong / Math.max(1, a.everMissed));
 
@@ -295,7 +320,10 @@ export async function computeNextAction(): Promise<NextAction & { stateHash: str
     }
     if (weakSubjects.length > 0) {
       const w = weakSubjects[0];
-      return { action: "subject", targetSubject: w.subject, reason: `${w.subject}が残り${w.currentWrong}問です`, href: href("subject", w.subject) };
+      // 解答数が薄い科目は、間違いが残っていても復習ではなく科目別演習を勧める
+      // （まだ見つかっていない弱点が多く残っている可能性が高いため）
+      const action = w.thin ? "subject" : "review";
+      return { action, targetSubject: w.subject, reason: `${w.subject}が残り${w.currentWrong}問です`, href: href(action, w.subject) };
     }
     if (underPracticedSubjects.length > 0) {
       const subject = underPracticedSubjects[0];
@@ -313,7 +341,8 @@ export async function computeNextAction(): Promise<NextAction & { stateHash: str
   }
 
   const feasibleActionsText = [
-    "- subject: 科目別演習（対象科目を1つ指定。苦手科目を重点的に潰す）",
+    "- subject: 科目別演習（対象科目を1つ指定。新しい問題で演習する）",
+    "- review: 復習モード（対象科目を1つ指定。過去に間違えて、まだ克服できていない問題だけを解き直す）",
     "- mock: 全科目演習（全科目を1問ずつ横断。手薄な科目を広く埋める・ストックを増やす）",
     examFeasible ? "- exam: 実戦模試（本番同形式・未出題の問題だけで力試し）" : null,
   ]
@@ -335,7 +364,11 @@ ${feasibleActionsText}
 - 解答数が少なく（${CONFIDENCE_THRESHOLD}問未満）苦手かどうかまだ判断できない科目: ${lowConfidenceSubjects.length}科目${lowConfidenceSubjects.length > 0 ? `（${lowConfidenceSubjects.slice(0, 6).join("、")}）` : ""}
 - 科目別の新規ストック（未出題の問題数）: 平均${avgUnserved.toFixed(1)}問/科目。特に少ない科目: ${thinSubjects.length > 0 ? thinSubjects.join("、") : "無し"}
 - 今も間違えたまま残っている問題: 全体で${wrongProgress.currentWrong}問（これまで間違えた${wrongProgress.everMissed}問中）
-- 苦手科目トップ3（演習中、間違えたまま残っている問題が多い順）: ${weakSubjects.length > 0 ? weakSubjects.slice(0, 3).map((s) => `${s.subject}(残り${s.currentWrong}問)`).join("、") : "無し"}
+- 苦手科目トップ3（演習中、間違えたまま残っている問題が多い順）: ${weakSubjects.length > 0 ? weakSubjects.slice(0, 3).map((s) => `${s.subject}(残り${s.currentWrong}問${s.thin ? "・解答数少" : ""})`).join("、") : "無し"}
+- 苦手科目トップ3の対応方法: 解答数が「少」と付いている科目は、間違いが残っていても
+  actionはreviewではなくsubjectにしてください（母数を増やしてまだ見つかっていない
+  弱点を洗い出すことを優先すべきため）。「少」が付いていない科目はactionをreviewに
+  してください（解答数は十分なので、残っている間違いをそのまま復習で潰すべきため）
 - 解答数が少なく判断できない科目は、間違いの有無に関わらず未挑戦の科目と同列に最優先で
   扱ってください。まだ解いていない問題の中に見つかっていない弱点が隠れている可能性が
   高く、母数を増やすこと自体が優先課題です。苦手科目トップ3への対応は、判断できない
@@ -363,13 +396,13 @@ ${feasibleActionsText}
     await logUsage({ source: "next-action", provider: llm.provider, model: llm.model, usage });
 
     if (object.action === "exam" && !examFeasible) return { ...fallback(), stateHash };
-    if (object.action === "subject") {
+    if (object.action === "subject" || object.action === "review") {
       if (!object.targetSubject || !knownSubjects.has(object.targetSubject)) return { ...fallback(), stateHash };
       return {
-        action: "subject",
+        action: object.action,
         targetSubject: object.targetSubject,
         reason: object.reason,
-        href: href("subject", object.targetSubject),
+        href: href(object.action, object.targetSubject),
         stateHash,
       };
     }
