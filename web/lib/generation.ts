@@ -139,7 +139,7 @@ function chunkBlock(chunks: RetrievedChunk[]): string {
  * （最小件数以外を選ぶ余地を残すと、同じ項目の焼き直しが増えるリスクがあるため
  * 厳密な最小値限定にしている）
  */
-async function pickTaxonomyItem(subject: string): Promise<TaxonomyItem> {
+async function pickTaxonomyItem(subject: string, profile: string): Promise<TaxonomyItem> {
   const sb = supabase();
   const { data: items, error } = await sb
     .from("taxonomy")
@@ -148,7 +148,13 @@ async function pickTaxonomyItem(subject: string): Promise<TaxonomyItem> {
   if (error || !items || items.length === 0) {
     throw new Error(`taxonomy not found for subject=${subject}（extract_kijun.py 実行済みか確認）`);
   }
-  const { data: existing } = await sb.from("questions").select("taxonomy_id").eq("subject", subject);
+  // 本人・動作テスト用はそれぞれ独立したプールとして出題基準のカバレッジを判定する
+  // （互いのプールを混ぜない。動作テスト用も本人と同じく200問に向けて満遍なく積み上げる）。
+  const { data: existing } = await sb
+    .from("questions")
+    .select("taxonomy_id")
+    .eq("subject", subject)
+    .eq("profile", profile);
   const countByItem = new Map<number, number>();
   for (const row of existing ?? []) {
     if (row.taxonomy_id == null) continue;
@@ -161,11 +167,13 @@ async function pickTaxonomyItem(subject: string): Promise<TaxonomyItem> {
 }
 
 /** 同じ出題基準項目で既に作られた問題文と、根拠として使用済みの抜粋（重複回避の材料） */
-async function existingCoverage(taxonomyId: number, limit = 15) {
+async function existingCoverage(taxonomyId: number, profile: string, limit = 15) {
+  // pickTaxonomyItemと同じ理由でprofileに限定する
   const { data } = await supabase()
     .from("questions")
     .select("stem, citations")
     .eq("taxonomy_id", taxonomyId)
+    .eq("profile", profile)
     .order("id", { ascending: false })
     .limit(limit);
   const stems = (data ?? []).map((q) => q.stem as string);
@@ -417,16 +425,21 @@ export type GenerateResult = {
  * ことになり、管理者専用にする要件そのものが破られるため、ここに引数を
  * 増やして呼び出し元から渡させるようなことは絶対にしないこと。
  *
- * pool・forceCaseAxisだけは例外（サーバー内部のストック補充ロジックだけが渡す値で、
- * クライアントから到達できないため上記の制約には抵触しない）。poolに'exam'を指定すると
- * 実戦模試専用の未消費ストックとして書き込まれ、通常の科目別演習・全科目演習の出題プールからは
- * 見えなくなる（questionSupply.ts側でpool='general'にフィルタしているため）。
+ * profile（"self"|"test"）は必須引数。本人・動作テスト用それぞれ独立したプールに
+ * 生成・保存する（questions.profile列で分離。他のattempts等と同じくクライアント自己申告の
+ * 区分をそのまま使う。LLMモデル選択とは別軸の関心事なので上記の制約には抵触しない）。
+ *
+ * pool・forceCaseAxisはサーバー内部のストック補充ロジックだけが渡す値で、クライアントから
+ * 到達できない。poolに'exam'を指定すると実戦模試専用の未消費ストックとして書き込まれ、
+ * 通常の科目別演習・全科目演習の出題プールからは見えなくなる
+ * （questionSupply.ts側でpool='general'にフィルタしているため）。
  * forceCaseAxisを指定すると、出題形式抽選のうち枠組み軸（事例の有無）だけを固定し、
  * 課題軸（用語選択/知識説明）はその軸内で科目ごとの実績比率から通常通り抽選する
  * （科目別演習の「事例問題のみ／事例なし」フィルタ用ストックを狙って埋めるための機能）。
  */
 export async function generateOneQuestion(
   subject: string,
+  profile: string,
   opts: { pool?: "general" | "exam"; forceCaseAxis?: CaseAxis } = {},
 ): Promise<GenerateResult> {
   const pool = opts.pool ?? "general";
@@ -434,7 +447,7 @@ export async function generateOneQuestion(
   const llm = await getLlmSettings();
 
   // 1. 出題対象のタクソノミー項目を選択（既存問題が少ない項目を優先）
-  const item = await pickTaxonomyItem(subject);
+  const item = await pickTaxonomyItem(subject, profile);
   const topic = [item.major, item.middle, item.minor].filter(Boolean).join(" > ");
 
   // 2. HyDE検索で根拠チャンク+周辺チャンクを取得
@@ -451,7 +464,7 @@ export async function generateOneQuestion(
   const answerCountWeights = await computeAnswerCountWeights(subject);
   const answerCount = pickAnswerCount(answerCountWeights);
   const fewShot = await fewShotExamples(subject, format);
-  const { stems: pastStems, excerpts: pastExcerpts } = await existingCoverage(item.id);
+  const { stems: pastStems, excerpts: pastExcerpts } = await existingCoverage(item.id, profile);
 
   // キャッシュを2段に分ける。
   // (1) universalInstructions: 科目・項目に一切依存しない、文字通り全呼び出し共通の
@@ -713,6 +726,7 @@ ${optionsList}
         status,
         model: modelName,
         pool,
+        profile,
       })
       .select("id")
       .single();
@@ -748,6 +762,7 @@ ${optionsList}
       status: "rejected",
       model: modelName,
       pool,
+      profile,
     });
   }
 

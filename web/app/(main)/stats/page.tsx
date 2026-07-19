@@ -66,7 +66,12 @@ export default function StatsPage() {
   }, []);
 
   useEffect(() => {
-    fetch("/api/stats")
+    // 本人・動作テスト用のどちらもこの画面を使う（応援する人はGuardianViewへ分岐済み）。
+    // profile未確定（初回訪問時等）はProfileGateが先に処理するためここには来ない想定だが、念のため防御する。
+    const activeProfile = getStoredProfile();
+    if (!activeProfile || activeProfile === "guardian") return;
+
+    fetch(`/api/stats?profile=${activeProfile}`)
       .then((r) => r.json())
       .then((d) => {
         if (d.error) setError(d.error);
@@ -83,7 +88,7 @@ export default function StatsPage() {
     // 月合算の正答率だけだと、例えば1回目80%・2回目50%で平均65%のように、
     // 実際にはどちらかの回が不合格でも見た目上は合格ラインを超えて見えてしまう。
     // 合否はあくまで「回ごと」に判定されるものなので、回ごとの結果も別途表示する
-    fetch("/api/exam/history")
+    fetch(`/api/exam/history?profile=${activeProfile}`)
       .then((r) => r.json())
       .then((d) => {
         if (!d.error) setHistory(d.history ?? []);

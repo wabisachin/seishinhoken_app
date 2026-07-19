@@ -1,8 +1,9 @@
-import { NextResponse, after } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { getCurrentExamAttempt, countRoundsThisMonth, hasStartedRoundToday } from "@/lib/examMode";
 import { EXAM_MONTHLY_LIMIT } from "@/lib/examFormat";
 import { getExamReadyRounds, topUpExamPool } from "@/lib/questionSupply";
 import { logError } from "@/lib/errorLog";
+import { isValidProfile } from "@/lib/profile";
 
 // after()で在庫補充を走らせる場合に備え、cron/exam-startと同じくmaxDurationを確保する
 export const maxDuration = 300;
@@ -12,7 +13,9 @@ const TOPUP_HOOK_TIME_BUDGET_MS = 270_000;
 // 間だけの簡易的なクールダウンでよい（別インスタンスに当たった場合の多少の重複は
 // 許容——却下判定と同じくactive>=targetチェックがあるので大きな無駄にはならない）
 const TRIGGER_COOLDOWN_MS = 60_000;
-let lastTriggeredAt = 0;
+// 本人・動作テスト用はそれぞれ独立して補充が走るため、クールダウンもprofileごとに分ける
+// （片方の直近トリガーがもう片方のトリガーを塞いでしまわないようにするため）。
+const lastTriggeredAt = new Map<string, number>();
 
 /**
  * full-mockページの選択画面はこれ1本で描画する。commonReady/specializedReadyは
@@ -26,22 +29,26 @@ let lastTriggeredAt = 0;
  * トリガーされないカタツムリ問題になっていた）。そのため、実際にページから
  * ポーリングされるこちらのGETで在庫不足を検知した時点で補充をトリガーする。
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const profile = request.nextUrl.searchParams.get("profile");
+    if (!isValidProfile(profile)) return NextResponse.json({ error: "profile is required" }, { status: 400 });
     const [current, roundsThisMonth, readyRounds, startedToday] = await Promise.all([
-      getCurrentExamAttempt("self"),
-      countRoundsThisMonth("self"),
-      getExamReadyRounds(),
-      hasStartedRoundToday("self"),
+      getCurrentExamAttempt(profile),
+      countRoundsThisMonth(profile),
+      getExamReadyRounds(profile),
+      hasStartedRoundToday(profile),
     ]);
     const remainingThisMonth = Math.max(0, EXAM_MONTHLY_LIMIT - roundsThisMonth);
     const commonReady = readyRounds.common >= 1;
     const specializedReady = readyRounds.specialized >= 1;
 
-    if ((!commonReady || !specializedReady) && Date.now() - lastTriggeredAt > TRIGGER_COOLDOWN_MS) {
-      lastTriggeredAt = Date.now();
+    if ((!commonReady || !specializedReady) && Date.now() - (lastTriggeredAt.get(profile) ?? 0) > TRIGGER_COOLDOWN_MS) {
+      lastTriggeredAt.set(profile, Date.now());
       after(() =>
-        topUpExamPool({ timeBudgetMs: TOPUP_HOOK_TIME_BUDGET_MS }).catch((e) => logError("exam-topup-hook", e)),
+        topUpExamPool(profile, { timeBudgetMs: TOPUP_HOOK_TIME_BUDGET_MS }).catch((e) =>
+          logError("exam-topup-hook", e, { profile }),
+        ),
       );
     }
 

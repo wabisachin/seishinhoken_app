@@ -3,6 +3,7 @@ import { supabase } from "@/lib/supabase";
 import type { Question } from "@/lib/types";
 import { logError } from "@/lib/errorLog";
 import { computeWrongStock } from "@/lib/reviewStock";
+import { isValidProfile } from "@/lib/profile";
 
 export const maxDuration = 60;
 
@@ -33,6 +34,8 @@ export async function GET(req: NextRequest) {
     const params = req.nextUrl.searchParams;
     const mode = params.get("mode") ?? "subject";
     const count = Math.min(parseInt(params.get("count") ?? "10", 10), 50);
+    const profile = params.get("profile");
+    if (!isValidProfile(profile)) return NextResponse.json({ error: "profile is required" }, { status: 400 });
 
     if (mode === "subject") {
       const subject = params.get("subject");
@@ -41,16 +44,17 @@ export async function GET(req: NextRequest) {
         .from("questions")
         .select(QUESTION_COLS)
         .eq("subject", subject)
-        .eq("status", "active");
+        .eq("status", "active")
+        .eq("profile", profile);
       if (error) throw new Error(error.message);
       return NextResponse.json({ questions: shuffle(data as Question[]).slice(0, count) });
     }
 
     if (mode === "review") {
       // 弱点ストック（一度でも間違えたことがあり、直近3問連続正解で卒業していない問題）を対象にする。
-      // 本人(profile='self')の解答だけを対象にし、応援する人の解答は無視する
+      // アクティブなprofile（本人／動作テスト用）の解答だけを対象にし、応援する人の解答は無視する
       const reviewSubject = params.get("subject"); // 未指定 or "all" なら全科目対象
-      const wrongStock = await computeWrongStock();
+      const wrongStock = await computeWrongStock(profile);
       let entries = [...wrongStock.entries()];
       if (reviewSubject && reviewSubject !== "all") {
         entries = entries.filter(([, e]) => e.subject === reviewSubject);

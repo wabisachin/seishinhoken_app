@@ -36,7 +36,9 @@ export default function GuardianView() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/exam/history")
+    // 応援する人は自分のデータプールを持たず、常に本人(self)のデータだけを見る
+    // （profile切り替えの概念自体を持たない）。
+    fetch("/api/exam/history?profile=self")
       .then((r) => r.json())
       .then((d) => {
         if (d.error) throw new Error(d.error);
@@ -44,7 +46,7 @@ export default function GuardianView() {
       })
       .catch(() => setError("データの読み込みに失敗しました。時間をおいて再度お試しください。"));
 
-    fetch("/api/quiz/review-summary")
+    fetch("/api/quiz/review-summary?profile=self")
       .then((r) => r.json())
       .then((d) => {
         if (d.error) throw new Error(d.error);

@@ -19,7 +19,8 @@ export function middleware(req: NextRequest) {
         const { logError } = await import("@/lib/errorLog");
         try {
           const claimed = await claimDeploymentTopUp(deploymentId);
-          if (claimed) await topUpAllSubjects();
+          // デプロイ直後の一括補充も本人(self)専用（cronと同じ理由でコストを一定に保つ）。
+          if (claimed) await topUpAllSubjects("self");
         } catch (e) {
           await logError("deploy-topup", e, { deploymentId });
         }

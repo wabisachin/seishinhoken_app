@@ -14,9 +14,9 @@ export default function GuidePage() {
     <div className="space-y-6">
       <h1 className="text-xl font-bold">このアプリの使い方</h1>
 
-      {/* 本人モードはナビバー枠(5個まで)の都合で合格ガイドをバナーから外しているため、
+      {/* 本人・動作テスト用はナビバー枠(5個まで)の都合で合格ガイドをバナーから外しているため、
           ここにリンクを置く。応援する人はバナーに合格ガイドが残っているので出さない */}
-      {profile === "self" && (
+      {profile !== "guardian" && profile !== null && (
         <section className="rounded-2xl bg-white p-5 shadow-warm">
           <h2 className="font-bold text-indigo-700">合格ガイド</h2>
           <p className="mt-2 text-sm leading-relaxed text-stone-700">

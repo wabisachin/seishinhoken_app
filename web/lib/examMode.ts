@@ -21,8 +21,10 @@ export type ExamAttemptRow = {
  * 進行中（両パートがまだ揃って完了していない）の回を1つ返す。このアプリは常に
  * 「前の回が完了するまで次の回を開始できない」運用なので、profileごとに高々1件しか
  * 該当しない前提（created_at最新の1件を見れば足りる）。
+ * profileは必須引数（デフォルト値を持たせない ── 呼び出し元にスコープを毎回明示させ、
+ * つけ忘れをコンパイルエラーに変えるため）。
  */
-export async function getCurrentExamAttempt(profile = "self"): Promise<ExamAttemptRow | null> {
+export async function getCurrentExamAttempt(profile: string): Promise<ExamAttemptRow | null> {
   const sb = supabase();
   const { data, error } = await sb
     .from("exam_attempts")
@@ -37,8 +39,8 @@ export async function getCurrentExamAttempt(profile = "self"): Promise<ExamAttem
   return row;
 }
 
-/** 暦月でリセットする月次上限用のカウント（既存/api/statsと同じ「文字列の年月比較」方式でタイムゾーンのずれを避ける）。 */
-export async function countRoundsThisMonth(profile = "self"): Promise<number> {
+/** 暦月でリセットする月次上限用のカウント（既存/api/statsと同じ「文字列の年月比較」方式でタイムゾーンのずれを避ける）。profileは必須引数。 */
+export async function countRoundsThisMonth(profile: string): Promise<number> {
   const sb = supabase();
   const { data, error } = await sb.from("exam_attempts").select("created_at").eq("profile", profile);
   if (error) throw new Error(error.message);
@@ -50,8 +52,9 @@ export async function countRoundsThisMonth(profile = "self"): Promise<number> {
  * 実戦模試は一日に何度も受けても実力測定として意味が無いため、新しい回(exam_attempts)を
  * 開始できるのは1日1回までに制限する（月5回の上限とは別軸のガード）。日付比較は
  * countRoundsThisMonthと同じ「文字列の年月日比較」方式でタイムゾーンのずれを避ける。
+ * profileは必須引数。
  */
-export async function hasStartedRoundToday(profile = "self"): Promise<boolean> {
+export async function hasStartedRoundToday(profile: string): Promise<boolean> {
   const sb = supabase();
   const { data, error } = await sb.from("exam_attempts").select("created_at").eq("profile", profile);
   if (error) throw new Error(error.message);
@@ -63,9 +66,11 @@ export async function hasStartedRoundToday(profile = "self"): Promise<boolean> {
  * 指定パートの出題を実戦模試専用ストック（pool='exam', status='active'）から科目ごとの
  * 本番出題数だけ確保し、即座にpool='general'へ更新する（=消費・通常プールへの合流を予約時点で
  * 確定させる）。いずれかの科目で在庫が足りない場合は何も更新せずnullを返す
- * （部分的な予約状態を残さない）。
+ * （部分的な予約状態を残さない）。profileは必須引数 ── 本人・動作テスト用はそれぞれ
+ * 独立した実戦模試プールを持ち、自分自身のプールからのみ予約する（topUpExamPoolも
+ * profileごとに独立して補充する）。
  */
-export async function reserveQuestionsForPart(part: ExamPart): Promise<number[] | null> {
+export async function reserveQuestionsForPart(part: ExamPart, profile: string): Promise<number[] | null> {
   const sb = supabase();
   const bySubject: number[][] = [];
   for (const { subject, questions } of subjectsForPart(part)) {
@@ -75,6 +80,7 @@ export async function reserveQuestionsForPart(part: ExamPart): Promise<number[] 
       .eq("subject", subject)
       .eq("pool", "exam")
       .eq("status", "active")
+      .eq("profile", profile)
       .limit(questions);
     if (error) throw new Error(error.message);
     const ids = (data ?? []).map((r) => r.id as number);

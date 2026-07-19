@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { Question } from "@/lib/types";
-import { getStoredProfile } from "@/lib/profile";
+import { getStoredProfile, profileScopedKey } from "@/lib/profile";
 import ExplanationList from "./ExplanationList";
 import { scrollToTop } from "./scrollToTop";
 
@@ -30,17 +30,17 @@ type Persisted = {
 function loadPersisted(): Persisted | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(profileScopedKey(STORAGE_KEY));
     return raw ? (JSON.parse(raw) as Persisted) : null;
   } catch {
     return null;
   }
 }
 function savePersisted(p: Persisted) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
+  localStorage.setItem(profileScopedKey(STORAGE_KEY), JSON.stringify(p));
 }
 function clearPersisted() {
-  localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(profileScopedKey(STORAGE_KEY));
 }
 
 async function requestNextQuestion(
@@ -50,7 +50,7 @@ async function requestNextQuestion(
   const res = await fetch("/api/quiz/next", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ subject, excludeIds }),
+    body: JSON.stringify({ subject, excludeIds, profile: getStoredProfile() ?? "self" }),
   });
   const d = await res.json();
   if (d.error) throw new Error(d.error);

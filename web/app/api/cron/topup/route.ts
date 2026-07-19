@@ -19,10 +19,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   try {
+    // 日次cronの一括補充は本人(self)専用に限定する（無条件に毎日走る背景ジョブのため、
+    // コストを一定に保つ）。動作テスト用の補充は実際の利用（出題直後フック）に
+    // 紐づく形でのみ行われる。
     const [{ results, remaining }, examResult, axisResult] = await Promise.all([
-      topUpAllSubjects(),
-      topUpExamPool({ timeBudgetMs: TOPUP_EXAM_TIME_BUDGET_MS }),
-      topUpCaseAxisAllSubjects({ timeBudgetMs: TOPUP_AXIS_TIME_BUDGET_MS }),
+      topUpAllSubjects("self"),
+      topUpExamPool("self", { timeBudgetMs: TOPUP_EXAM_TIME_BUDGET_MS }),
+      topUpCaseAxisAllSubjects("self", { timeBudgetMs: TOPUP_AXIS_TIME_BUDGET_MS }),
     ]);
     return NextResponse.json({ ok: true, results, remaining, exam: examResult, caseAxis: axisResult });
   } catch (e) {

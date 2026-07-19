@@ -23,15 +23,19 @@ export async function POST(req: NextRequest) {
     if (typeof password !== "string" || !checkPassword(password)) {
       return NextResponse.json({ error: "パスワードが違います" }, { status: 401 });
     }
+    // resetUnservedQuestionsは本人(self)のプール専用（questionSupply.ts参照）。
+    // 削除対象が本人のプールだけなので、再構築も本人だけを対象にする。
     const { deleted } = await resetUnservedQuestions();
-    // resetUnservedQuestionsは通常プール・実戦模試プールの両方から未出題分を削除するため、
+    // 通常プール・実戦模試プールの両方から未出題分を削除するため、
     // 再構築も両方行う（出題形式別ストックも同じ未出題分に含まれるため合わせて再構築する）
-    after(() => topUpAllSubjects().catch((e) => logError("reset-unserved-topup", e)));
+    after(() => topUpAllSubjects("self").catch((e) => logError("reset-unserved-topup", e)));
     after(() =>
-      topUpExamPool({ timeBudgetMs: RESET_TOPUP_TIME_BUDGET_MS }).catch((e) => logError("reset-unserved-exam-topup", e)),
+      topUpExamPool("self", { timeBudgetMs: RESET_TOPUP_TIME_BUDGET_MS }).catch((e) =>
+        logError("reset-unserved-exam-topup", e),
+      ),
     );
     after(() =>
-      topUpCaseAxisAllSubjects({ timeBudgetMs: RESET_TOPUP_TIME_BUDGET_MS }).catch((e) =>
+      topUpCaseAxisAllSubjects("self", { timeBudgetMs: RESET_TOPUP_TIME_BUDGET_MS }).catch((e) =>
         logError("reset-unserved-axis-topup", e),
       ),
     );

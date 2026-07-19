@@ -1,16 +1,23 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { logError } from "@/lib/errorLog";
 import { computePartResult, computeVerdict, ExamAttemptRow } from "@/lib/examMode";
+import { isValidProfile } from "@/lib/profile";
 
-/** 完了済み回（両パート完了）の一覧。得点率・合否・日時。成績タブ・full-mockページ両方で使う。 */
-export async function GET() {
+/**
+ * 完了済み回（両パート完了）の一覧。得点率・合否・日時。成績タブ・full-mockページ両方で使う。
+ * profileは必須クエリパラメータ ── 呼び出し元がexam/history?profile=self（応援する人は常にこれ）
+ * または動作テスト用のアクティブprofileを明示的に指定する。
+ */
+export async function GET(req: NextRequest) {
   try {
+    const profile = req.nextUrl.searchParams.get("profile");
+    if (!isValidProfile(profile)) return NextResponse.json({ error: "profile is required" }, { status: 400 });
     const sb = supabase();
     const { data: rows, error } = await sb
       .from("exam_attempts")
       .select("*")
-      .eq("profile", "self")
+      .eq("profile", profile)
       .eq("common_status", "completed")
       .eq("specialized_status", "completed")
       .order("created_at", { ascending: false });

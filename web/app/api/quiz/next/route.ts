@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { getOrGenerateNext, topUpSubject, topUpCaseAxisStock } from "@/lib/questionSupply";
 import type { CaseAxis } from "@/lib/generation";
 import { logError } from "@/lib/errorLog";
+import { isValidProfile } from "@/lib/profile";
 
 // 出題直後フックのtopUpSubject（after()内）は、このmaxDurationを超えると強制終了され、
 // topUpInFlightの解除(finally)が走らずその科目が永久にスキップされ続けるバグになる
@@ -25,22 +26,27 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const subject: string | undefined = body.subject;
     if (!subject) return NextResponse.json({ error: "subject is required" }, { status: 400 });
+    const profile: string | undefined = body.profile;
+    if (!isValidProfile(profile)) return NextResponse.json({ error: "profile is required" }, { status: 400 });
     const excludeIds: number[] = Array.isArray(body.excludeIds) ? body.excludeIds : [];
     const caseAxis: CaseAxis | undefined = body.caseAxis === "case" || body.caseAxis === "nocase" ? body.caseAxis : undefined;
-    const result = await getOrGenerateNext(subject, excludeIds, caseAxis);
+    const result = await getOrGenerateNext(subject, excludeIds, profile, caseAxis);
 
     // ストックの「消費」は回答送信時ではなく、問題が画面に出される（＝取り出される）
     // このタイミングで起きたとみなす。after()はレスポンス返却後に実行されるため、
     // ユーザーの待ち時間には一切影響しない（かんばん方式の補充トリガー）。
+    // 本人・動作テスト用どちらも、実際に出題を消費したそのprofile自身のプールを補充する
+    // （実利用に紐づく補充のみ。日次cronの一括補充とは別に、本人限定ではなく実際に
+    // 消費したprofileへ即座に反応する）。
     if (result.question) {
       after(() =>
-        topUpSubject(subject, { timeBudgetMs: TOPUP_HOOK_TIME_BUDGET_MS }).catch((e) =>
-          logError("quiz-next-topup", e, { subject }),
+        topUpSubject(subject, profile, { timeBudgetMs: TOPUP_HOOK_TIME_BUDGET_MS }).catch((e) =>
+          logError("quiz-next-topup", e, { subject, profile }),
         ),
       );
       after(() =>
-        topUpCaseAxisStock(subject, { timeBudgetMs: TOPUP_HOOK_TIME_BUDGET_MS }).catch((e) =>
-          logError("quiz-next-axis-topup", e, { subject }),
+        topUpCaseAxisStock(subject, profile, { timeBudgetMs: TOPUP_HOOK_TIME_BUDGET_MS }).catch((e) =>
+          logError("quiz-next-axis-topup", e, { subject, profile }),
         ),
       );
     }

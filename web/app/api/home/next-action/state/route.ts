@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getNextActionStateHash, type PendingResumeInfo } from "@/lib/nextAction";
 import { logError } from "@/lib/errorLog";
+import { isValidProfile } from "@/lib/profile";
 
 function parsePendingResume(searchParams: URLSearchParams): PendingResumeInfo | null {
   const kind = searchParams.get("pendingKind");
@@ -17,8 +18,10 @@ function parsePendingResume(searchParams: URLSearchParams): PendingResumeInfo | 
  */
 export async function GET(request: NextRequest) {
   try {
+    const profile = request.nextUrl.searchParams.get("profile");
+    if (!isValidProfile(profile)) return NextResponse.json({ error: "profile is required" }, { status: 400 });
     const pendingResume = parsePendingResume(request.nextUrl.searchParams);
-    const stateHash = await getNextActionStateHash(pendingResume);
+    const stateHash = await getNextActionStateHash(profile, pendingResume);
     return NextResponse.json({ stateHash });
   } catch (e) {
     await logError("next-action-state-route", e);

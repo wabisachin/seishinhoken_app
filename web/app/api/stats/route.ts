@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { logError } from "@/lib/errorLog";
+import { isValidProfile } from "@/lib/profile";
 
 type Bucket = { attempts: number; correct: number };
 function accuracyOf(t: Bucket): number {
@@ -14,18 +15,21 @@ function addTo(map: Map<string, Bucket>, key: string, attempts: number, correct:
 }
 
 /**
- * 本人(profile='self')の成績を返す。科目別演習・全科目演習・復習モードなど全モードを
- * 合算した従来のsubject_statsではなく、実戦模試（exam_subject_stats、一度も出題
+ * 指定profileの成績を返す（本人・動作テスト用のどちらも同じロジックで自分のデータを見られる。
+ * 応援する人は常にprofile=selfを指定して呼び出す）。科目別演習・全科目演習・復習モードなど
+ * 全モードを合算した従来のsubject_statsではなく、実戦模試（exam_subject_stats、一度も出題
  * されていない問題だけで構成される本番同形式の模試）のみを対象にする。既出問題の
  * 解き直しが混ざると「未知の問題への対応力」という知りたい指標が読めなくなるため。
  * 試験対策としては「今どの位置にいるか」が重要で、全期間の累積値はさほど意味を
  * 持たないため、当月のデータを主役にし、月ごとの推移（全体・科目別）を副次情報として添える。
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const profile = req.nextUrl.searchParams.get("profile");
+    if (!isValidProfile(profile)) return NextResponse.json({ error: "profile is required" }, { status: 400 });
     const sb = supabase();
     const [{ data, error }, { data: taxSubjects }, { data: pastSubjects }] = await Promise.all([
-      sb.from("exam_subject_stats").select("subject, day, attempts, correct").eq("profile", "self").order("day", { ascending: true }),
+      sb.from("exam_subject_stats").select("subject, day, attempts, correct").eq("profile", profile).order("day", { ascending: true }),
       sb.from("taxonomy").select("subject"),
       sb.from("past_questions").select("subject, kind"),
     ]);

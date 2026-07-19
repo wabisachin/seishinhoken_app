@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import type { Mode, Question } from "@/lib/types";
-import { getStoredProfile } from "@/lib/profile";
+import { getStoredProfile, profileScopedKey } from "@/lib/profile";
 import AllSubjectsQuiz from "./AllSubjectsQuiz";
 import ExplanationList from "./ExplanationList";
 import { scrollToTop } from "./scrollToTop";
@@ -61,17 +61,17 @@ type PersistedSubjectSession = {
 function loadSubjectSession(): PersistedSubjectSession | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = localStorage.getItem(SUBJECT_SESSION_KEY);
+    const raw = localStorage.getItem(profileScopedKey(SUBJECT_SESSION_KEY));
     return raw ? (JSON.parse(raw) as PersistedSubjectSession) : null;
   } catch {
     return null;
   }
 }
 function saveSubjectSession(s: PersistedSubjectSession) {
-  localStorage.setItem(SUBJECT_SESSION_KEY, JSON.stringify(s));
+  localStorage.setItem(profileScopedKey(SUBJECT_SESSION_KEY), JSON.stringify(s));
 }
 function clearSubjectSession() {
-  localStorage.removeItem(SUBJECT_SESSION_KEY);
+  localStorage.removeItem(profileScopedKey(SUBJECT_SESSION_KEY));
 }
 
 type ReviewSubjectSummary = {
@@ -97,7 +97,12 @@ async function requestNextQuestion(
   const res = await fetch("/api/quiz/next", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ subject, excludeIds, caseAxis: caseFilter === "all" ? undefined : caseFilter }),
+    body: JSON.stringify({
+      subject,
+      excludeIds,
+      caseAxis: caseFilter === "all" ? undefined : caseFilter,
+      profile: getStoredProfile() ?? "self",
+    }),
   });
   const d = await res.json();
   if (d.error) throw new Error(d.error);
@@ -147,7 +152,7 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
     }
     if (mode === "review") {
       setReviewSummaryLoading(true);
-      fetch("/api/quiz/review-summary")
+      fetch(`/api/quiz/review-summary?profile=${getStoredProfile() ?? "self"}`)
         .then((r) => r.json())
         .then((d) => {
           setReviewSubjects(reviewCandidates(d.subjects ?? []));
@@ -310,7 +315,11 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
       return;
     }
 
-    const qs = new URLSearchParams({ mode, count: String(mode === "review" ? REVIEW_COUNT : count) });
+    const qs = new URLSearchParams({
+      mode,
+      count: String(mode === "review" ? REVIEW_COUNT : count),
+      profile: getStoredProfile() ?? "self",
+    });
     if (mode === "review") qs.set("subject", subjectOverride ?? subject ?? "all");
     const res = await fetch(`/api/quiz?${qs}`);
     const d = await res.json();
@@ -712,7 +721,7 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
                 // 科目選択をやり直せるよう、選択画面に戻す（成績が変わっている可能性もあるため
                 // 苦手科目の集計も再取得する）
                 setReviewSummaryLoading(true);
-                fetch("/api/quiz/review-summary")
+                fetch(`/api/quiz/review-summary?profile=${getStoredProfile() ?? "self"}`)
                   .then((r) => r.json())
                   .then((d) => {
                     setReviewSubjects(reviewCandidates(d.subjects ?? []));

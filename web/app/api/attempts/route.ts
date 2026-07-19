@@ -9,9 +9,9 @@ export async function POST(req: NextRequest) {
     if (!question_id || !Array.isArray(selected) || !mode) {
       return NextResponse.json({ error: "question_id, selected[], mode are required" }, { status: 400 });
     }
-    // 本人・応援する人が同時にアプリを使っても回答履歴が混ざらないよう、
+    // 本人・動作テスト用・応援する人が同時にアプリを使っても回答履歴が混ざらないよう、
     // クライアントの自己申告区分をそのまま記録する（不明な値は自己申告なし扱い）
-    const safeProfile = profile === "self" || profile === "guardian" ? profile : "self";
+    const safeProfile = profile === "self" || profile === "guardian" || profile === "test" ? profile : "self";
     const sb = supabase();
     const { data: q, error } = await sb
       .from("questions")

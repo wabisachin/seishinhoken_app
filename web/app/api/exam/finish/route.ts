@@ -33,13 +33,15 @@ export async function POST(req: NextRequest) {
       const answeredIds = new Set((answeredRows ?? []).map((r) => r.question_id as number));
       const unanswered = questionIds.filter((id) => !answeredIds.has(id));
       if (unanswered.length > 0) {
+        // クライアント入力を信用せず、この回自体のprofile（exam_attempts行）から導出する。
+        // ここを誤ると集計ビュー（exam_subject_stats）への振り分けが静かに壊れるため重要。
         const { error: insError } = await sb.from("attempts").insert(
           unanswered.map((question_id) => ({
             question_id,
             selected: [],
             is_correct: false,
             mode: "exam",
-            profile: "self",
+            profile: typedRow.profile,
             exam_attempt_id: examAttemptId,
           })),
         );

@@ -18,9 +18,6 @@ export default function AdminPage() {
   const [settings, setSettings] = useState<LlmSettings | null>(null);
   const [presets, setPresets] = useState<Preset[]>([]);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
-  const [resetConfirm, setResetConfirm] = useState(false);
-  const [resetMsg, setResetMsg] = useState<string | null>(null);
-  const [resetPasswordInput, setResetPasswordInput] = useState("");
   const [errors, setErrors] = useState<ErrorLog[]>([]);
   const [expandedError, setExpandedError] = useState<number | null>(null);
   const [usageTotals, setUsageTotals] = useState<UsageTotals | null>(null);
@@ -149,21 +146,6 @@ export default function AdminPage() {
     }
   }
 
-  async function runReset() {
-    setResetMsg("実行中...");
-    const res = await fetch("/api/admin/reset", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password: resetPasswordInput }),
-    });
-    const d = await res.json();
-    setResetMsg(res.ok ? "リセットしました（生成問題・解答履歴を削除）" : `エラー: ${d.error}`);
-    if (res.ok) {
-      setResetConfirm(false);
-      setResetPasswordInput("");
-    }
-  }
-
   async function runResetUnserved() {
     setResetUnservedMsg("実行中...");
     const res = await fetch("/api/admin/reset-unserved", {
@@ -228,6 +210,7 @@ export default function AdminPage() {
           「未出題」は本人がまだ一度も解いていない問題の数（目標は常時5問。裏側のCron・出題フックが
           自動で埋めるので通常は操作不要）。「アクティブ計」はこれまで生成された問題の累計で、
           一度出題しても減らないため、練習が進んだ科目ほど未出題より大きくなります。
+          ※この在庫表示は本人(self)のプールのみが対象です。動作テスト用のプールは含みません。
         </p>
         {stockCheckedAt && (
           <p className="mt-1 text-xs text-slate-400">{new Date(stockCheckedAt).toLocaleString("ja-JP")} 時点</p>
@@ -272,6 +255,8 @@ export default function AdminPage() {
         <p className="mt-1 text-sm text-slate-500">
           実戦模試専用の未消費ストック（一度も出題していない問題）。目標は「本番出題数×3回分」で、
           受験のたびに消費されて通常プールへ合流するため、常にこの目標値を保つよう裏側で補充されます。
+          ※この在庫表示は本人(self)のプールのみが対象です。動作テスト用は独自のプールを持ち
+          （利用に応じて自動生成されます）、ここには含みません。
         </p>
         {examReadyRounds && (
           <p className="mt-2 text-sm font-medium text-slate-700">
@@ -341,6 +326,7 @@ export default function AdminPage() {
         <p className="mt-1 text-sm text-slate-500">
           HyDE検索クエリ生成・問題生成・自己検証、それぞれのLLM呼び出しごとのトークン数から概算しています。
           実際の請求額とは単価表の更新タイミングにより差が出ることがあります。
+          ※本人・動作テスト用を分けず合算で表示しています（意図的な仕様）。
         </p>
         {!usageTotals || usageCallCount === 0 ? (
           <p className="mt-3 text-sm text-slate-400">まだ記録がありません。</p>
@@ -387,52 +373,6 @@ export default function AdminPage() {
             </table>
           </>
         )}
-      </section>
-
-      <section className="rounded-xl bg-white p-5 shadow">
-        <h2 className="font-bold text-red-700">リセット</h2>
-        <p className="mt-1 text-sm text-slate-500">
-          生成済み問題・解答履歴を全て削除します（教科書データ・出題基準・過去問は消えません）。検証用データを消して本番運用を始める時に使います。
-        </p>
-        {!resetConfirm ? (
-          <button
-            onClick={() => setResetConfirm(true)}
-            className="mt-3 min-h-12 rounded-lg bg-red-600 px-4 py-3 text-sm font-medium text-white hover:bg-red-700"
-          >
-            リセットする
-          </button>
-        ) : (
-          <div className="mt-3 space-y-2">
-            <p className="text-sm font-medium text-red-700">本当に削除しますか？元に戻せません。確認のためパスワードを入力してください。</p>
-            <input
-              type="password"
-              value={resetPasswordInput}
-              onChange={(e) => setResetPasswordInput(e.target.value)}
-              placeholder="パスワード"
-              autoFocus
-              className="min-h-12 w-full rounded-lg border border-slate-300 p-3"
-            />
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <button
-                onClick={runReset}
-                disabled={!resetPasswordInput}
-                className="min-h-12 rounded-lg bg-red-600 px-4 py-3 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                削除を実行
-              </button>
-              <button
-                onClick={() => {
-                  setResetConfirm(false);
-                  setResetPasswordInput("");
-                }}
-                className="min-h-12 rounded-lg border border-slate-300 px-4 py-3 text-sm text-slate-600"
-              >
-                キャンセル
-              </button>
-            </div>
-          </div>
-        )}
-        {resetMsg && <p className="mt-3 text-sm text-slate-700">{resetMsg}</p>}
       </section>
 
       <section className="rounded-xl bg-white p-5 shadow">

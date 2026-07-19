@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { EXAM_SUBJECT_COUNTS } from "@/lib/examFormat";
+import { getStoredProfile, profileScopedKey } from "@/lib/profile";
 
 const SUBJECT_PART: Record<string, "common" | "specialized"> = Object.fromEntries(
   EXAM_SUBJECT_COUNTS.map((s) => [s.subject, s.part]),
@@ -41,14 +42,14 @@ type NextActionCache = NextAction & { stateHash: string };
 function loadCachedNextAction(): NextActionCache | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = localStorage.getItem(NEXT_ACTION_CACHE_KEY);
+    const raw = localStorage.getItem(profileScopedKey(NEXT_ACTION_CACHE_KEY));
     return raw ? (JSON.parse(raw) as NextActionCache) : null;
   } catch {
     return null;
   }
 }
 function saveCachedNextAction(action: NextActionCache) {
-  localStorage.setItem(NEXT_ACTION_CACHE_KEY, JSON.stringify(action));
+  localStorage.setItem(profileScopedKey(NEXT_ACTION_CACHE_KEY), JSON.stringify(action));
 }
 
 function formatMonth(month: string) {
@@ -296,7 +297,7 @@ type PendingResume = { href: string; label: string; kind: "mock" | "subject"; su
 function checkPendingResume(): PendingResume {
   if (typeof window === "undefined") return null;
   try {
-    const raw = localStorage.getItem("quiz_session_allsubjects_v1");
+    const raw = localStorage.getItem(profileScopedKey("quiz_session_allsubjects_v1"));
     if (raw) {
       const p = JSON.parse(raw) as { answers?: Record<string, unknown>; subjectOrder?: string[] };
       const answered = Object.keys(p.answers ?? {}).length;
@@ -314,7 +315,7 @@ function checkPendingResume(): PendingResume {
     // 壊れたデータは無視する
   }
   try {
-    const raw = localStorage.getItem("quiz_session_subject_v1");
+    const raw = localStorage.getItem(profileScopedKey("quiz_session_subject_v1"));
     if (raw) {
       const p = JSON.parse(raw) as { records?: unknown[]; count?: number; subject?: string };
       const answered = (p.records ?? []).length;
@@ -345,18 +346,24 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const profile = getStoredProfile();
+    // ProfileGateがprofile未確定の間はこの画面自体を描画しないため通常は必ず値が
+    // 入っているが、念のための防御。
+    if (!profile) return;
+    const profileQuery = `profile=${profile}`;
+
     const cached = loadCachedNextAction();
     // 前回途中で終えた演習があれば、その情報を「おすすめの次の一手」にも伝える
     // （computeNextActionがこれを最優先で提案するため、バナーとの言動が揃う）
     const pending = checkPendingResume();
     const pendingQuery = pending
-      ? `?pendingKind=${pending.kind}&pendingLabel=${encodeURIComponent(pending.label)}${
+      ? `&pendingKind=${pending.kind}&pendingLabel=${encodeURIComponent(pending.label)}${
           pending.subject ? `&pendingSubject=${encodeURIComponent(pending.subject)}` : ""
         }`
       : "";
     // まず状態のフィンガープリントだけを安く取得し、前回キャッシュ時と一致するなら
     // LLM呼び出し（/api/home/next-action）自体をスキップしてキャッシュをそのまま使う
-    fetch(`/api/home/next-action/state${pendingQuery}`)
+    fetch(`/api/home/next-action/state?${profileQuery}${pendingQuery}`)
       .then((r) => r.json())
       .then((d) => {
         if (d.error) throw new Error(d.error);
@@ -364,7 +371,7 @@ export default function Dashboard() {
           setNextAction(cached);
           return;
         }
-        return fetch(`/api/home/next-action${pendingQuery}`)
+        return fetch(`/api/home/next-action?${profileQuery}${pendingQuery}`)
           .then((r) => r.json())
           .then((fresh) => {
             if (!fresh.error) {
@@ -379,7 +386,7 @@ export default function Dashboard() {
       })
       .finally(() => setNextActionLoading(false));
 
-    fetch("/api/quiz/review-summary")
+    fetch(`/api/quiz/review-summary?${profileQuery}`)
       .then((r) => r.json())
       .then((d) => {
         if (d.error) throw new Error(d.error);
@@ -389,7 +396,7 @@ export default function Dashboard() {
       })
       .catch(() => setError("データの読み込みに失敗しました。時間をおいて再度お試しください。"));
 
-    fetch("/api/stats")
+    fetch(`/api/stats?${profileQuery}`)
       .then((r) => r.json())
       .then((d) => {
         if (d.error) throw new Error(d.error);
@@ -397,7 +404,7 @@ export default function Dashboard() {
       })
       .catch(() => setError("データの読み込みに失敗しました。時間をおいて再度お試しください。"));
 
-    fetch("/api/exam/state")
+    fetch(`/api/exam/state?${profileQuery}`)
       .then((r) => r.json())
       .then((d) => {
         if (!d.error) setExamRemainingThisMonth(d.remainingThisMonth ?? null);

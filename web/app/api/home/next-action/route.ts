@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { computeNextAction, type PendingResumeInfo } from "@/lib/nextAction";
 import { logError } from "@/lib/errorLog";
+import { isValidProfile } from "@/lib/profile";
 
 export const maxDuration = 30;
 
@@ -14,8 +15,10 @@ function parsePendingResume(searchParams: URLSearchParams): PendingResumeInfo | 
 /** ホーム画面の「おすすめの次の一手」。ロジックはlib/nextAction.ts参照。 */
 export async function GET(request: NextRequest) {
   try {
+    const profile = request.nextUrl.searchParams.get("profile");
+    if (!isValidProfile(profile)) return NextResponse.json({ error: "profile is required" }, { status: 400 });
     const pendingResume = parsePendingResume(request.nextUrl.searchParams);
-    const result = await computeNextAction(pendingResume);
+    const result = await computeNextAction(profile, pendingResume);
     return NextResponse.json(result);
   } catch (e) {
     await logError("next-action-route", e);

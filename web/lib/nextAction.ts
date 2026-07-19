@@ -56,7 +56,7 @@ function href(action: NextAction["action"], targetSubject: string | null): strin
  * 組み立てられ、LLM呼び出しは含まない（stateHashだけを安く取得できるようにするため、
  * computeNextActionと分離してある）。
  */
-async function gatherState(pendingResume: PendingResumeInfo | null) {
+async function gatherState(pendingResume: PendingResumeInfo | null, profile: string) {
   const sb = supabase();
   const [
     stockSnapshot,
@@ -69,22 +69,22 @@ async function gatherState(pendingResume: PendingResumeInfo | null) {
     latestExamRows,
     examAttemptDetailRows,
   ] = await Promise.all([
-    getStockSnapshot(),
-    getWrongStockProgress(),
-    getWrongStockProgressBySubject(),
-    getExamReadyRounds(),
-    countRoundsThisMonth("self"),
-    hasStartedRoundToday("self"),
-    sb.from("attempts").select("question_id, questions!inner(subject)").eq("profile", "self"),
+    getStockSnapshot(profile),
+    getWrongStockProgress(profile),
+    getWrongStockProgressBySubject(profile),
+    getExamReadyRounds(profile),
+    countRoundsThisMonth(profile),
+    hasStartedRoundToday(profile),
+    sb.from("attempts").select("question_id, questions!inner(subject)").eq("profile", profile),
     sb
       .from("exam_attempts")
       .select("*")
-      .eq("profile", "self")
+      .eq("profile", profile)
       .eq("common_status", "completed")
       .eq("specialized_status", "completed")
       .order("created_at", { ascending: false })
       .limit(1),
-    sb.from("attempts").select("is_correct, questions!inner(subject)").eq("profile", "self").eq("mode", "exam"),
+    sb.from("attempts").select("is_correct, questions!inner(subject)").eq("profile", profile).eq("mode", "exam"),
   ]);
 
   // 「解答数」は重複の無い問題数（同じ問題を復習で何度も解き直した分は水増ししない）。
@@ -259,8 +259,8 @@ async function gatherState(pendingResume: PendingResumeInfo | null) {
 }
 
 /** LLMを呼ばずに状態のフィンガープリントだけを安く取得する。ホーム画面がこれで前回と比較し、変化が無ければLLM呼び出し自体を省略する。 */
-export async function getNextActionStateHash(pendingResume: PendingResumeInfo | null = null): Promise<string> {
-  const state = await gatherState(pendingResume);
+export async function getNextActionStateHash(profile: string, pendingResume: PendingResumeInfo | null = null): Promise<string> {
+  const state = await gatherState(pendingResume, profile);
   return state.stateHash;
 }
 
@@ -274,9 +274,10 @@ export async function getNextActionStateHash(pendingResume: PendingResumeInfo | 
  * 万一のフォーマット逸脱・API失敗に備えてコード側でも検証し、決定的なフォールバックを用意する。
  */
 export async function computeNextAction(
+  profile: string,
   pendingResume: PendingResumeInfo | null = null,
 ): Promise<NextAction & { stateHash: string }> {
-  const state = await gatherState(pendingResume);
+  const state = await gatherState(pendingResume, profile);
   const {
     stockSnapshot,
     wrongProgress,

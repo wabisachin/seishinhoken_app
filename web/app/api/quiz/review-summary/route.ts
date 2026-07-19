@@ -1,9 +1,10 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { logError } from "@/lib/errorLog";
 import { getWrongStockProgress, getWrongStockProgressBySubject } from "@/lib/reviewStock";
 import { listSubjects } from "@/lib/subjects";
 import { getStockSnapshot, SUBJECT_TARGET } from "@/lib/questionSupply";
+import { isValidProfile } from "@/lib/profile";
 
 /**
  * 復習モードの科目選択画面・ホーム画面の弱点マップ用。全科目（過去問+タクソノミーの
@@ -15,12 +16,15 @@ import { getStockSnapshot, SUBJECT_TARGET } from "@/lib/questionSupply";
  * （このアプリの学習ゴールは、一度間違えた問題を同一問題で3回連続正解させて
  * 克服することであり、正答率という統計量で評価するものではないため）。
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const profile = req.nextUrl.searchParams.get("profile");
+    if (!isValidProfile(profile)) return NextResponse.json({ error: "profile is required" }, { status: 400 });
+
     const [{ data: attempts, error }, allSubjects, stockSnapshot] = await Promise.all([
-      supabase().from("attempts").select("question_id, questions!inner(subject)").eq("profile", "self"),
+      supabase().from("attempts").select("question_id, questions!inner(subject)").eq("profile", profile),
       listSubjects(),
-      getStockSnapshot(),
+      getStockSnapshot(profile),
     ]);
     if (error) throw new Error(error.message);
 
@@ -28,7 +32,10 @@ export async function GET() {
     // 直近3問連続正解で卒業していない問題の数。これは全期間で見る（間違えた問題は
     // 解き直して正解するまでずっとストックに残るのがこのアプリの学習ゴールであり、
     // 直近何件かで判定するものではない）
-    const [progress, progressBySubject] = await Promise.all([getWrongStockProgress(), getWrongStockProgressBySubject()]);
+    const [progress, progressBySubject] = await Promise.all([
+      getWrongStockProgress(profile),
+      getWrongStockProgressBySubject(profile),
+    ]);
     const totalWrong = progress.currentWrong;
 
     // 解答数は「これまでに出題された、重複の無い問題の数」（窓で区切らない全期間）。

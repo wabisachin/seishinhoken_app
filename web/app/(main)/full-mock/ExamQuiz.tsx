@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { Question } from "@/lib/types";
 import { describeFailedGroups, type ExamPart } from "@/lib/examFormat";
 import { scrollToTop } from "../quiz/scrollToTop";
+import { getStoredProfile } from "@/lib/profile";
 
 const PART_LABEL: Record<ExamPart, string> = { common: "午前の部（共通科目）", specialized: "午後の部（専門科目）" };
 
@@ -70,7 +71,7 @@ export default function ExamQuiz() {
   async function loadState() {
     setPhase("checking");
     try {
-      const res = await fetch("/api/exam/state");
+      const res = await fetch(`/api/exam/state?profile=${getStoredProfile() ?? "self"}`);
       const d = (await res.json()) as ExamState & { error?: string };
       if (d.error) throw new Error(d.error);
       setState(d);
@@ -83,7 +84,7 @@ export default function ExamQuiz() {
 
   async function loadHistory() {
     try {
-      const res = await fetch("/api/exam/history");
+      const res = await fetch(`/api/exam/history?profile=${getStoredProfile() ?? "self"}`);
       const d = await res.json();
       if (!d.error) setHistory(d.history ?? []);
     } catch {
@@ -122,7 +123,7 @@ export default function ExamQuiz() {
       const res = await fetch("/api/exam/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ part: p }),
+        body: JSON.stringify({ part: p, profile: getStoredProfile() ?? "self" }),
       });
       const d = await res.json();
       if (d.error) throw new Error(d.error);
@@ -240,7 +241,13 @@ export default function ExamQuiz() {
           const res = await fetch("/api/attempts", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ question_id: q.id, selected, mode: "exam", profile: "self", exam_attempt_id: examAttemptId }),
+            body: JSON.stringify({
+              question_id: q.id,
+              selected,
+              mode: "exam",
+              profile: getStoredProfile() ?? "self",
+              exam_attempt_id: examAttemptId,
+            }),
           });
           const d = await res.json();
           return { id: q.id, selected, isCorrect: !!d.is_correct };
