@@ -21,6 +21,7 @@ type ExamState = {
 type Answer = { selected: number[]; isCorrect: boolean };
 type SubjectScore = { subject: string; correct: number; total: number };
 type Verdict = { passed: boolean; overallRate: number; totalCorrect: number; totalQuestions: number; failedGroups: string[] };
+type HistoryEntry = { examAttemptId: number; completedAt: string; verdict: Verdict; bySubject: SubjectScore[] };
 // /api/exam/questionsはそのexam_attempt内での解答(yourAnswer)を埋め込んで返すため、
 // 再開時の進捗（どこまで解答済みか）・残り時間はどちらもサーバー側の記録だけを正として
 // 復元する（localStorageには一切頼らない。別端末・ブラウザデータ消去後でも、途中離脱
@@ -55,6 +56,12 @@ export default function ExamQuiz() {
   const [finishedPart, setFinishedPart] = useState<ExamPart | null>(null);
   const [verdict, setVerdict] = useState<Verdict | null>(null);
   const [finalQuestions, setFinalQuestions] = useState<ExamQuestion[]>([]);
+  // 過去に完了した回の一覧・詳細レポート表示用。完了直後に一度だけ見られる結果画面
+  // (final-result)だけだと、他のページに移動したりリロードすると二度と見返せなかったため、
+  // /api/exam/history（既存API、以前はGuardianView.tsxからしか使われていなかった）を
+  // 使って一覧から後からいつでも同じ詳細画面を開けるようにする
+  const [history, setHistory] = useState<HistoryEntry[] | null>(null);
+  const [viewingHistory, setViewingHistory] = useState(false);
 
   const finishingRef = useRef(false);
 
@@ -72,9 +79,38 @@ export default function ExamQuiz() {
     }
   }
 
+  async function loadHistory() {
+    try {
+      const res = await fetch("/api/exam/history");
+      const d = await res.json();
+      if (!d.error) setHistory(d.history ?? []);
+    } catch {
+      // 一覧の読み込み失敗は致命的ではないため、セクション自体を出さないだけにする
+    }
+  }
+
   useEffect(() => {
     void loadState();
+    void loadHistory();
   }, []);
+
+  async function openHistoryDetail(entry: HistoryEntry) {
+    setError(null);
+    setPhase("starting");
+    try {
+      const res = await fetch(`/api/exam/questions?examAttemptId=${entry.examAttemptId}`);
+      const d = await res.json();
+      if (d.error) throw new Error(d.error);
+      setFinalQuestions((d.questions ?? []) as ExamQuestion[]);
+      setVerdict(entry.verdict);
+      setExpandedSubject(null);
+      setViewingHistory(true);
+      setPhase("final-result");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setPhase("error");
+    }
+  }
 
   async function beginPart(p: ExamPart) {
     setError(null);
@@ -292,6 +328,36 @@ export default function ExamQuiz() {
   }
 
   if (phase === "select" && state) {
+    // 過去の回一覧。古い順に第1回・第2回...と番号を振る（履歴自体は新しい順で表示）
+    const sortedAsc = [...(history ?? [])].sort((a, b) => a.completedAt.localeCompare(b.completedAt));
+    const roundNumberById = new Map(sortedAsc.map((h, i) => [h.examAttemptId, i + 1]));
+
+    const historySection = history && history.length > 0 && (
+      <section className="space-y-2">
+        <h2 className="font-bold text-stone-700">過去の受験結果</h2>
+        {history.map((h) => (
+          <button
+            key={h.examAttemptId}
+            onClick={() => void openHistoryDetail(h)}
+            className="flex w-full items-center justify-between gap-3 rounded-2xl bg-white p-4 text-left shadow-warm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-warm-lg"
+          >
+            <div>
+              <p className="font-bold text-stone-800">第{roundNumberById.get(h.examAttemptId)}回</p>
+              <p className="text-xs text-stone-500">{new Date(h.completedAt).toLocaleDateString("ja-JP")}</p>
+            </div>
+            <div className="text-right">
+              <p className={`font-bold ${h.verdict.passed ? "text-green-600" : "text-red-600"}`}>
+                {h.verdict.passed ? "合格ライン到達" : "不合格ライン"}
+              </p>
+              <p className="text-sm text-stone-600">
+                {h.verdict.totalCorrect}/{h.verdict.totalQuestions}（{Math.round(h.verdict.overallRate * 100)}%）
+              </p>
+            </div>
+          </button>
+        ))}
+      </section>
+    );
+
     if (state.remainingThisMonth === 0 && !state.hasInProgress) {
       return (
         <div className="space-y-4">
@@ -299,6 +365,7 @@ export default function ExamQuiz() {
           <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-800">
             今月の受験回数（月5回まで）の上限に達しました。来月になるとまた受けられるようになります。
           </p>
+          {historySection}
         </div>
       );
     }
@@ -309,6 +376,7 @@ export default function ExamQuiz() {
           <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-800">
             実戦模試は実力測定のため1日1回までです。今日はもう受験済みなので、日をまたぐとまた新しい回を始められます。
           </p>
+          {historySection}
         </div>
       );
     }
@@ -353,6 +421,7 @@ export default function ExamQuiz() {
             );
           })}
         </div>
+        {historySection}
       </div>
     );
   }
@@ -395,7 +464,7 @@ export default function ExamQuiz() {
     const rows = [...bySubjectMap.values()].sort((a, b) => a.correct / Math.max(a.total, 1) - b.correct / Math.max(b.total, 1));
     return (
       <div className="space-y-4">
-        <h1 className="text-xl font-bold">実戦模試 結果</h1>
+        <h1 className="text-xl font-bold">{viewingHistory ? "過去の受験結果" : "実戦模試 結果"}</h1>
         <div className={`rounded-2xl p-6 text-center shadow-warm ${verdict.passed ? "bg-green-50" : "bg-red-50"}`}>
           <p className={`text-2xl font-bold ${verdict.passed ? "text-green-700" : "text-red-700"}`}>
             {verdict.passed ? "合格ライン到達" : "不合格ライン"}

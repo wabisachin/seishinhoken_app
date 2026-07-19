@@ -21,6 +21,8 @@ type SubjectStat = { subject: string; kind: string | null; attempts: number; cor
 type KindStat = { kind: string; attempts: number; correct: number; accuracy: number };
 type MonthlyRow = { month: string; attempts: number; accuracy: number };
 type SubjectMonthlyRow = { subject: string; month: string; attempts: number; correct: number; accuracy: number };
+type Verdict = { passed: boolean; overallRate: number; totalCorrect: number; totalQuestions: number; failedGroups: string[] };
+type HistoryRow = { examAttemptId: number; completedAt: string; verdict: Verdict };
 
 const KIND_LABEL: Record<string, string> = { common: "共通科目", specialized: "専門科目", other: "その他" };
 // 1回だけ答えた科目がたまたま得意/苦手TOPに出てしまわないよう、最低解答数を設ける
@@ -56,6 +58,7 @@ export default function StatsPage() {
   const [byKindThisMonth, setByKindThisMonth] = useState<KindStat[]>([]);
   const [monthly, setMonthly] = useState<MonthlyRow[]>([]);
   const [bySubjectMonthly, setBySubjectMonthly] = useState<SubjectMonthlyRow[]>([]);
+  const [history, setHistory] = useState<HistoryRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -76,6 +79,16 @@ export default function StatsPage() {
         }
       })
       .catch(() => setError("データの読み込みに失敗しました。時間をおいて再度お試しください。"));
+
+    // 月合算の正答率だけだと、例えば1回目80%・2回目50%で平均65%のように、
+    // 実際にはどちらかの回が不合格でも見た目上は合格ラインを超えて見えてしまう。
+    // 合否はあくまで「回ごと」に判定されるものなので、回ごとの結果も別途表示する
+    fetch("/api/exam/history")
+      .then((r) => r.json())
+      .then((d) => {
+        if (!d.error) setHistory(d.history ?? []);
+      })
+      .catch(() => {});
   }, []);
 
   if (profile === "checking") return null;
@@ -132,7 +145,63 @@ export default function StatsPage() {
             <> ／ {formatMonth(summary.lastMonth)} {summary.lastMonthAttempts}問・{summary.lastMonthAccuracy}%</>
           )}
         </p>
+        <p className="mt-2 text-xs text-stone-400">
+          ※ 上の数字は今月受けた回をすべて合算したものです。合否は回ごとに判定されるため、
+          合算では合格ラインに見えても個別の回では不合格ということがあります。下の「回ごとの結果」で確認してください。
+        </p>
       </section>
+
+      {(() => {
+        if (!history) return null;
+        const thisMonth = new Date().toISOString().slice(0, 7);
+        const thisMonthRounds = history.filter((h) => h.completedAt.slice(0, 7) === thisMonth);
+        if (thisMonthRounds.length === 0) return null;
+        const passCount = thisMonthRounds.filter((h) => h.verdict.passed).length;
+        const totalCorrectSum = thisMonthRounds.reduce((sum, h) => sum + h.verdict.totalCorrect, 0);
+        const totalQuestionsSum = thisMonthRounds.reduce((sum, h) => sum + h.verdict.totalQuestions, 0);
+        const overallRate = totalQuestionsSum > 0 ? Math.round((100 * totalCorrectSum) / totalQuestionsSum) : null;
+        const sortedAsc = [...thisMonthRounds].sort((a, b) => a.completedAt.localeCompare(b.completedAt));
+        const allSortedAsc = [...history].sort((a, b) => a.completedAt.localeCompare(b.completedAt));
+        const roundNumberById = new Map(allSortedAsc.map((h, i) => [h.examAttemptId, i + 1]));
+        return (
+          <section className="rounded-2xl bg-white p-5 shadow-warm">
+            <h2 className="mb-3 font-bold text-indigo-700">{formatMonth(thisMonth)}の回ごとの結果</h2>
+            <div className="mb-3 grid grid-cols-3 gap-3 text-center">
+              <div>
+                <p className="text-2xl font-bold text-stone-800">{thisMonthRounds.length}回</p>
+                <p className="text-xs text-stone-500">受験回数</p>
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-green-600">{passCount}回</p>
+                <p className="text-xs text-stone-500">合格</p>
+              </div>
+              <div>
+                <p className={`text-2xl font-bold ${overallRate !== null && overallRate >= 60 ? "text-green-600" : "text-red-600"}`}>
+                  {overallRate}%
+                </p>
+                <p className="text-xs text-stone-500">合算得点率</p>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              {sortedAsc.map((h) => (
+                <div key={h.examAttemptId} className="flex items-center justify-between gap-2 rounded-xl bg-stone-50 p-2.5">
+                  <span className="text-sm font-medium text-stone-700">第{roundNumberById.get(h.examAttemptId)}回</span>
+                  <span className="text-xs text-stone-400">{new Date(h.completedAt).toLocaleDateString("ja-JP")}</span>
+                  <span className="text-sm text-stone-600">
+                    {h.verdict.totalCorrect}/{h.verdict.totalQuestions}（{Math.round(h.verdict.overallRate * 100)}%）
+                  </span>
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-bold ${h.verdict.passed ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                    {h.verdict.passed ? "合格" : "不合格"}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <Link href="/full-mock" className="mt-3 inline-block text-sm font-medium text-indigo-600 underline underline-offset-2">
+              実戦模試で各回の詳細（問題・解答・解説）を見る
+            </Link>
+          </section>
+        );
+      })()}
 
       {summary.thisMonthAttempts === 0 ? (
         <div className="space-y-2 rounded-2xl bg-amber-50 p-4 text-sm text-amber-800">
