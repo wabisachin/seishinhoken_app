@@ -1,13 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { clearStoredProfile, getStoredProfile, setStoredProfile, type UserProfile } from "@/lib/profile";
 
 export default function ProfileGate({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null | "checking">("checking");
   const pathname = usePathname();
-  const router = useRouter();
 
   useEffect(() => {
     setProfile(getStoredProfile());
@@ -15,8 +14,11 @@ export default function ProfileGate({ children }: { children: React.ReactNode })
 
   function choose(p: UserProfile) {
     setStoredProfile(p);
-    setProfile(p);
-    router.push(p === "guardian" ? "/stats" : "/");
+    // router.push（クライアント側遷移）だと、layout.tsxに常駐しているHeaderNav
+    // （ヘッダーのタイトルリンク・ナビタブ）がリマウントされず、プロフィールに応じた
+    // 表示に切り替わらないまま古い状態で残ってしまう。ページ全体を読み込み直す
+    // switchProfile()と同じ方式にして、ヘッダーも含め確実に切り替える
+    window.location.href = p === "guardian" ? "/stats" : "/";
   }
 
   function switchToSelf() {
