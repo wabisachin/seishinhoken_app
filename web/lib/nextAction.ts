@@ -23,10 +23,11 @@ export type NextAction = {
 const STOCK_LOW_THRESHOLD = 3;
 // これ未満の科目が残っていれば「まだ全体像を触れていない」とみなす目安
 const UNTOUCHED_THRESHOLD = 3;
-// ホーム画面の科目別弱点マップ（web/app/(main)/page.tsx）と揃えた、正答率・克服判定の
-// 信頼性が低いとみなす解答数の目安（意図的に同じ値を独立に持つ。クライアント側の
-// page.tsxからはサーバー専用のこのファイルを直接importできないため。review-summary APIの
-// 直近件数の窓RECENT_WINDOW=30とも揃えている）
+// ホーム画面の科目別弱点マップ（web/app/(main)/page.tsx）と揃えた、まだ試していない
+// 問題の中に見つかっていない弱点が隠れている可能性が高いとみなす解答数の目安
+// （意図的に同じ値を独立に持つ。クライアント側のpage.tsxからはサーバー専用のこの
+// ファイルを直接importできないため。review-summary APIの直近件数の窓RECENT_WINDOW=30
+// とも揃えている）
 const CONFIDENCE_THRESHOLD = 30;
 
 const NextActionSchema = z.object({
@@ -336,9 +337,9 @@ ${feasibleActionsText}
 - 今も間違えたまま残っている問題: 全体で${wrongProgress.currentWrong}問（これまで間違えた${wrongProgress.everMissed}問中）
 - 苦手科目トップ3（演習中、間違えたまま残っている問題が多い順）: ${weakSubjects.length > 0 ? weakSubjects.slice(0, 3).map((s) => `${s.subject}(残り${s.currentWrong}問)`).join("、") : "無し"}
 - 解答数が少なく判断できない科目は、間違いの有無に関わらず未挑戦の科目と同列に最優先で
-  扱ってください。解答数が少ないうちに「苦手」と決めつけるのは判定として不安定です
-  （数問間違えた直後に3問連続正解しただけで「克服」判定されるなど、サンプルが少なすぎて
-  信頼できないため）。苦手科目トップ3への対応は、判断できない科目が無くなった後にしてください
+  扱ってください。まだ解いていない問題の中に見つかっていない弱点が隠れている可能性が
+  高く、母数を増やすこと自体が優先課題です。苦手科目トップ3への対応は、判断できない
+  科目が無くなった後にしてください
 - 実戦模試（一度も出題されていない問題での本番形式）での科目別正答率が低い科目トップ3:
   ${examWeakSubjects.length > 0 ? examWeakSubjects.map((s) => `${s.subject}(正答率${Math.round(s.accuracy * 100)}%・${s.total}問中)`).join("、") : "実戦模試のデータがまだ十分にありません"}
 - 実戦模試での正答率の低さは、演習で「間違えたまま残っている問題」が無くなっていても

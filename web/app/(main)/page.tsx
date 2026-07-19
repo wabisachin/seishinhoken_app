@@ -52,6 +52,13 @@ function formatMonth(month: string) {
   return `${y}年${parseInt(m, 10)}月`;
 }
 
+function median(nums: number[]): number {
+  if (nums.length === 0) return 0;
+  const sorted = [...nums].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
 function ProgressRing({ percent, size = 96 }: { percent: number; size?: number }) {
   const clamped = Math.max(0, Math.min(100, percent));
   const deg = Math.round(3.6 * clamped);
@@ -68,128 +75,131 @@ function ProgressRing({ percent, size = 96 }: { percent: number; size?: number }
 }
 
 // 科目別弱点マップの優先度。「わかっている弱点」より「まだ何もわからない科目」の方が
-// リスクが高い（本番で不意に0点科目群を引く恐れがある）ため、未挑戦・データ不足を
+// リスクが高い（本番で不意に0点科目群を引く恐れがある）ため、未挑戦・データが薄い科目を
 // 既知の弱点より上位に表示する
-type MapCategory = "untouched" | "lowConfidence" | "needsReview" | "confidentOk";
-// これ未満の解答数では、正答率で判断すること自体の意味が薄いとみなす目安。
-// 演習モードでは「正答率」より「解いた量」と「残り問題の絶対数」の方が重要
-// （正答率が主役になるのは実力を測る実戦模試の役割）。review-summary APIの
-// 直近件数の窓(RECENT_WINDOW=30)と揃えている
+type MapCategory = "untouched" | "needsReview" | "confidentOk";
+// これ未満の解答数では、正答率・弱点判定の意味が薄いとみなす絶対的な目安。
+// review-summary APIの直近件数の窓(RECENT_WINDOW=30)と揃えている
 const CONFIDENCE_THRESHOLD = 30;
 
 function categorize(s: ReviewSubject): MapCategory {
   if (s.total === 0) return "untouched";
-  // データ不足の判定を間違い判定より先にする。解答数が少ないうちに「間違いあり」を
-  // 弱点として確定させると、たまたま数問間違えた直後に3問連続正解しただけで
-  // 「克服」判定されてしまうなど、サンプルが少なすぎて判定自体の信頼性が無い。
-  // まずCONFIDENCE_THRESHOLD問以上こなして判定材料を揃えてから、弱点判定に進む
-  if (s.total < CONFIDENCE_THRESHOLD) return "lowConfidence";
   if (s.wrongCount > 0) return "needsReview";
   return "confidentOk";
 }
 
-function WeaknessRow({ s }: { s: ReviewSubject }) {
-  const [showInfo, setShowInfo] = useState(false);
-  const category = categorize(s);
-  const cleared = Math.max(0, s.everMissed - s.wrongCount);
-  const clearedRate = s.everMissed > 0 ? cleared / s.everMissed : 0;
-  const volumeRate = Math.min(1, s.total / CONFIDENCE_THRESHOLD);
+/**
+ * 「解答数がまだ薄い」を示す独立フラグ。categorize()の弱点判定（間違いの有無）とは別軸で、
+ * (a) 絶対的な最低ライン(CONFIDENCE_THRESHOLD問)に届いていない、(b) 他の科目と比べても
+ * 相対的に少ない（全18科目の中央値の半分以下）、のいずれかを満たせばtrue。
+ * 弱点マップは正答率ではなく「間違えたまま残っている問題の総数」で評価するものなので、
+ * 解答数の少なさは判定の統計的信頼性の問題ではなく、単に「まだ試していない問題の中に
+ * 見つかっていない弱点が隠れているかもしれない」というカバレッジの問題である。
+ * 既知の弱点(赤バッジ)の有無に関わらず、その注意喚起として上にも重ねて表示する
+ * （間違いの情報自体は隠さない）
+ */
+function isDataThin(s: ReviewSubject, medianTotal: number): boolean {
+  if (s.total === 0) return false;
+  return s.total < CONFIDENCE_THRESHOLD || s.total <= medianTotal / 2;
+}
 
-  // バーは「正答率」ではなく、その科目の演習でいま最も意味のある進捗を表す:
-  // 既知の弱点はゴール（弱点ゼロ）までの克服率、データ不足はまず十分な量を
-  // 解けているかの目安、克服済みは満タン、未挑戦は空
-  let barPercent = 0;
-  let barColor = "bg-stone-200";
-  if (category === "needsReview") {
-    barPercent = Math.round(clearedRate * 100);
-    barColor = clearedRate < 0.34 ? "bg-red-500" : clearedRate < 0.67 ? "bg-amber-500" : "bg-green-500";
-  } else if (category === "lowConfidence") {
-    barPercent = Math.round(volumeRate * 100);
-    barColor = "bg-amber-400";
-  } else if (category === "confidentOk") {
-    barPercent = 100;
-    barColor = "bg-green-500";
-  }
+function WeaknessRow({ s, medianTotal }: { s: ReviewSubject; medianTotal: number }) {
+  const [showDetail, setShowDetail] = useState(false);
+  const category = categorize(s);
+  const thin = isDataThin(s, medianTotal);
+  const cleared = Math.max(0, s.everMissed - s.wrongCount);
+
+  // バーは全カテゴリ共通で「解答数の蓄積度」を表す（0〜CONFIDENCE_THRESHOLD問で0→100%、
+  // 克服済みは満タン）。以前はカテゴリごとに異なる指標（克服率・解答数比率など）を使って
+  // いたため、科目によってバーの意味がバラバラで長さも比較しにくかった
+  const barPercent = category === "confidentOk" ? 100 : Math.round(Math.min(1, s.total / CONFIDENCE_THRESHOLD) * 100);
+  const barColor = category === "needsReview" ? "bg-red-400" : category === "untouched" ? "bg-stone-200" : "bg-green-500";
 
   const badge =
     category === "needsReview" ? (
       <span className="shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-700">残り{s.wrongCount}問</span>
     ) : category === "untouched" ? (
       <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">未挑戦</span>
-    ) : category === "lowConfidence" ? (
-      <span className="flex shrink-0 items-center gap-1">
-        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">データ不足</span>
+    ) : (
+      <span className="shrink-0 rounded-full bg-green-100 px-2 py-0.5 text-xs font-bold text-green-700">OK</span>
+    );
+
+  const clickable = category !== "confidentOk";
+  const linkHref =
+    category === "needsReview"
+      ? `/quiz?mode=review&subject=${encodeURIComponent(s.subject)}`
+      : `/quiz?mode=subject&subject=${encodeURIComponent(s.subject)}`;
+
+  const row = (
+    <div className={`flex items-center gap-2 rounded-xl p-2.5 transition-colors ${clickable ? "bg-white shadow-warm-sm hover:bg-indigo-50" : "opacity-50"}`}>
+      <span className="w-28 shrink-0 truncate text-sm text-stone-700 sm:w-36">{s.subject}</span>
+      <div className="h-2 flex-1 overflow-hidden rounded-full bg-stone-100">
+        <div className={`h-full rounded-full ${barColor}`} style={{ width: `${barPercent}%` }} />
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        {thin && (
+          <span
+            className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-amber-400 text-[10px] font-bold leading-none text-white"
+            title="解答数がまだ少なく、間違えた問題がまだ見つかっていないだけの可能性があります"
+          >
+            ！
+          </span>
+        )}
+        {badge}
         <button
           type="button"
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            setShowInfo((v) => !v);
+            setShowDetail((v) => !v);
           }}
-          aria-label="データ不足の説明を見る"
-          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-amber-200 text-[10px] font-bold leading-none text-amber-800"
+          aria-label="詳細を見る"
+          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-stone-400 transition-colors hover:bg-stone-100"
         >
-          ？
+          <span className="text-xs">ⓘ</span>
         </button>
-      </span>
-    ) : (
-      <span className="shrink-0 rounded-full bg-green-100 px-2 py-0.5 text-xs font-bold text-green-700">OK</span>
-    );
-
-  const subtext =
-    category === "needsReview"
-      ? `解答数${s.total}問（${cleared}/${s.everMissed}問克服）`
-      : category === "untouched"
-        ? "まだ解いていません"
-        : category === "lowConfidence"
-          ? `解答数${s.total}/${CONFIDENCE_THRESHOLD}問${s.wrongCount > 0 ? `（うち残り${s.wrongCount}問）` : ""}`
-          : `解答数${s.total}問`;
-
-  const clickable = category !== "confidentOk";
-  const content = (
-    <div className={`flex items-center gap-3 rounded-xl p-2.5 transition-colors ${clickable ? "bg-white shadow-warm-sm hover:bg-indigo-50" : "opacity-50"}`}>
-      <span className="w-28 shrink-0 truncate text-sm text-stone-700 sm:w-36">{s.subject}</span>
-      <div className="h-2 flex-1 overflow-hidden rounded-full bg-stone-100">
-        <div className={`h-full rounded-full ${barColor}`} style={{ width: `${barPercent}%` }} />
-      </div>
-      <div className="flex shrink-0 flex-col items-end gap-0.5">
-        {badge}
-        <span className="text-[11px] text-stone-400">{subtext}</span>
       </div>
     </div>
   );
-  if (category === "needsReview") {
-    return (
-      <Link href={`/quiz?mode=review&subject=${encodeURIComponent(s.subject)}`} className="block">
-        {content}
-      </Link>
-    );
-  }
-  if (category === "untouched" || category === "lowConfidence") {
-    return (
-      <div>
-        <Link href={`/quiz?mode=subject&subject=${encodeURIComponent(s.subject)}`} className="block">
-          {content}
+
+  return (
+    <div>
+      {clickable ? (
+        <Link href={linkHref} className="block">
+          {row}
         </Link>
-        {showInfo && category === "lowConfidence" && (
-          <p className="mt-1 rounded-lg bg-amber-50 p-2 text-xs leading-relaxed text-amber-800">
-            解答数が{s.total}/{CONFIDENCE_THRESHOLD}問とまだ少なく、苦手かどうかを正しく判断できません（少数の解答だけで弱点と決めつけると、たまたま数問間違えた直後に3問連続正解しただけで「克服」判定されるなど、判定自体の信頼性が無いため）。あと{Math.max(0, CONFIDENCE_THRESHOLD - s.total)}問解答すると判定できるようになります。未挑戦の科目と同じく優先して演習すべき科目です。
-          </p>
-        )}
-      </div>
-    );
-  }
-  return content;
+      ) : (
+        row
+      )}
+      {showDetail && (
+        <div className="mt-1 space-y-0.5 rounded-lg bg-stone-50 p-2 text-xs leading-relaxed text-stone-600">
+          <p>解答数: {s.total}問</p>
+          {s.everMissed > 0 && (
+            <p>
+              克服: {cleared}/{s.everMissed}問
+            </p>
+          )}
+          {thin && (
+            <p className="text-amber-700">
+              解答数がまだ少なく（目安{CONFIDENCE_THRESHOLD}問、または他科目の解答数の中央値の半分）、プールの中の未着手の問題にまだ弱点が隠れている可能性があります。優先して演習することをおすすめします。
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
-// 共通科目/専門科目の1セクション分。優先度（未挑戦・データ不足 > 既知の弱点 > OK）は
+// 共通科目/専門科目の1セクション分。優先度（未挑戦・データが薄い科目 > 既知の弱点 > OK）は
 // 全体と同じ考え方をセクション内で適用する
-function WeaknessMapSection({ title, subjects }: { title: string; subjects: ReviewSubject[] }) {
+function WeaknessMapSection({ title, subjects, medianTotal }: { title: string; subjects: ReviewSubject[]; medianTotal: number }) {
   if (subjects.length === 0) return null;
   const untouched = subjects.filter((s) => categorize(s) === "untouched");
-  const lowConfidence = subjects.filter((s) => categorize(s) === "lowConfidence");
-  const needsReview = subjects.filter((s) => categorize(s) === "needsReview");
-  const confidentOk = subjects.filter((s) => categorize(s) === "confidentOk");
+  const rest = subjects.filter((s) => categorize(s) !== "untouched");
+  const thin = rest.filter((s) => isDataThin(s, medianTotal));
+  const solid = rest.filter((s) => !isDataThin(s, medianTotal));
+  const needsReview = solid.filter((s) => categorize(s) === "needsReview");
+  const confidentOk = solid.filter((s) => categorize(s) === "confidentOk");
   const SHOWN_CONFIDENT_OK = 3;
   const shownConfidentOk = confidentOk.slice(0, SHOWN_CONFIDENT_OK);
   const hiddenConfidentOkCount = confidentOk.length - shownConfidentOk.length;
@@ -202,16 +212,16 @@ function WeaknessMapSection({ title, subjects }: { title: string; subjects: Revi
       </h3>
       <div className="space-y-1.5">
         {untouched.map((s) => (
-          <WeaknessRow key={s.subject} s={s} />
+          <WeaknessRow key={s.subject} s={s} medianTotal={medianTotal} />
         ))}
-        {lowConfidence.map((s) => (
-          <WeaknessRow key={s.subject} s={s} />
+        {thin.map((s) => (
+          <WeaknessRow key={s.subject} s={s} medianTotal={medianTotal} />
         ))}
         {needsReview.map((s) => (
-          <WeaknessRow key={s.subject} s={s} />
+          <WeaknessRow key={s.subject} s={s} medianTotal={medianTotal} />
         ))}
         {shownConfidentOk.map((s) => (
-          <WeaknessRow key={s.subject} s={s} />
+          <WeaknessRow key={s.subject} s={s} medianTotal={medianTotal} />
         ))}
       </div>
       {hiddenConfidentOkCount > 0 && (
@@ -291,6 +301,7 @@ export default function Dashboard() {
   const commonSubjects = (reviewSubjects ?? []).filter((s) => SUBJECT_PART[s.subject] === "common");
   const specializedSubjects = (reviewSubjects ?? []).filter((s) => SUBJECT_PART[s.subject] === "specialized");
   const totalAnsweredOverall = (reviewSubjects ?? []).reduce((sum, s) => sum + s.total, 0);
+  const medianTotal = median((reviewSubjects ?? []).map((s) => s.total));
 
   return (
     <div className="space-y-6">
@@ -372,12 +383,12 @@ export default function Dashboard() {
             <span className="text-xs font-normal text-stone-400">全体で計{totalAnsweredOverall}問解答</span>
           </h2>
           <p className="mb-3 text-xs text-stone-400">
-            未挑戦・データ不足の科目を優先表示。タップすると、既知の弱点は復習モード、
-            未挑戦・データ不足の科目は科目別演習が始まります。
+            未挑戦・解答数が少ない科目（！マーク）を優先表示。タップすると、既知の弱点は
+            復習モード、それ以外は科目別演習が始まります。ⓘで詳細を表示できます。
           </p>
           <div className="space-y-5">
-            <WeaknessMapSection title="共通科目" subjects={commonSubjects} />
-            <WeaknessMapSection title="専門科目" subjects={specializedSubjects} />
+            <WeaknessMapSection title="共通科目" subjects={commonSubjects} medianTotal={medianTotal} />
+            <WeaknessMapSection title="専門科目" subjects={specializedSubjects} medianTotal={medianTotal} />
           </div>
         </section>
       )}
