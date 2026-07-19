@@ -79,8 +79,12 @@ const CONFIDENCE_THRESHOLD = 30;
 
 function categorize(s: ReviewSubject): MapCategory {
   if (s.total === 0) return "untouched";
-  if (s.wrongCount > 0) return "needsReview";
+  // データ不足の判定を間違い判定より先にする。解答数が少ないうちに「間違いあり」を
+  // 弱点として確定させると、たまたま数問間違えた直後に3問連続正解しただけで
+  // 「克服」判定されてしまうなど、サンプルが少なすぎて判定自体の信頼性が無い。
+  // まずCONFIDENCE_THRESHOLD問以上こなして判定材料を揃えてから、弱点判定に進む
   if (s.total < CONFIDENCE_THRESHOLD) return "lowConfidence";
+  if (s.wrongCount > 0) return "needsReview";
   return "confidentOk";
 }
 
@@ -138,7 +142,7 @@ function WeaknessRow({ s }: { s: ReviewSubject }) {
       : category === "untouched"
         ? "まだ解いていません"
         : category === "lowConfidence"
-          ? `解答数${s.total}/${CONFIDENCE_THRESHOLD}問`
+          ? `解答数${s.total}/${CONFIDENCE_THRESHOLD}問${s.wrongCount > 0 ? `（うち残り${s.wrongCount}問）` : ""}`
           : `解答数${s.total}問`;
 
   const clickable = category !== "confidentOk";
@@ -169,7 +173,7 @@ function WeaknessRow({ s }: { s: ReviewSubject }) {
         </Link>
         {showInfo && category === "lowConfidence" && (
           <p className="mt-1 rounded-lg bg-amber-50 p-2 text-xs leading-relaxed text-amber-800">
-            今は間違えたまま残っている問題はありませんが、解答数が{s.total}/{CONFIDENCE_THRESHOLD}問とまだ少なく、実力を正しく判断できません。あと{Math.max(0, CONFIDENCE_THRESHOLD - s.total)}問解答すると解消されます。未挑戦の科目と同じく優先して演習すべき科目です。
+            解答数が{s.total}/{CONFIDENCE_THRESHOLD}問とまだ少なく、苦手かどうかを正しく判断できません（少数の解答だけで弱点と決めつけると、たまたま数問間違えた直後に3問連続正解しただけで「克服」判定されるなど、判定自体の信頼性が無いため）。あと{Math.max(0, CONFIDENCE_THRESHOLD - s.total)}問解答すると判定できるようになります。未挑戦の科目と同じく優先して演習すべき科目です。
           </p>
         )}
       </div>

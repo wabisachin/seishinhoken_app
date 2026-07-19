@@ -51,24 +51,34 @@ function href(action: NextAction["action"], targetSubject: string | null): strin
  */
 async function gatherState() {
   const sb = supabase();
-  const [stockSnapshot, wrongProgress, wrongBySubject, readyRounds, roundsThisMonth, startedToday, attemptedRows, latestExamRows] =
-    await Promise.all([
-      getStockSnapshot(),
-      getWrongStockProgress(),
-      getWrongStockProgressBySubject(),
-      getExamReadyRounds(),
-      countRoundsThisMonth("self"),
-      hasStartedRoundToday("self"),
-      sb.from("attempts").select("questions!inner(subject)").eq("profile", "self"),
-      sb
-        .from("exam_attempts")
-        .select("*")
-        .eq("profile", "self")
-        .eq("common_status", "completed")
-        .eq("specialized_status", "completed")
-        .order("created_at", { ascending: false })
-        .limit(1),
-    ]);
+  const [
+    stockSnapshot,
+    wrongProgress,
+    wrongBySubject,
+    readyRounds,
+    roundsThisMonth,
+    startedToday,
+    attemptedRows,
+    latestExamRows,
+    examAttemptDetailRows,
+  ] = await Promise.all([
+    getStockSnapshot(),
+    getWrongStockProgress(),
+    getWrongStockProgressBySubject(),
+    getExamReadyRounds(),
+    countRoundsThisMonth("self"),
+    hasStartedRoundToday("self"),
+    sb.from("attempts").select("questions!inner(subject)").eq("profile", "self"),
+    sb
+      .from("exam_attempts")
+      .select("*")
+      .eq("profile", "self")
+      .eq("common_status", "completed")
+      .eq("specialized_status", "completed")
+      .order("created_at", { ascending: false })
+      .limit(1),
+    sb.from("attempts").select("is_correct, questions!inner(subject)").eq("profile", "self").eq("mode", "exam"),
+  ]);
 
   const attemptCountBySubject = new Map<string, number>();
   for (const r of (attemptedRows.data ?? []) as unknown as { questions: { subject: string } | null }[]) {
@@ -91,6 +101,47 @@ async function gatherState() {
     .map(([subject, p]) => ({ subject, ...p }))
     .filter((s) => s.currentWrong > 0)
     .sort((a, b) => b.currentWrong / Math.max(1, b.everMissed) - a.currentWrong / Math.max(1, a.everMissed));
+
+  // 判定材料は十分(CONFIDENCE_THRESHOLD問以上)だが、他の科目に比べて解答数が相対的に
+  // 少ない科目。「最低限はクリアしたが、他と比べるとまだ薄い」というアプリ利用が
+  // 進んだ中盤以降向けのバランス調整シグナル（未挑戦・データ不足が無くなった後の
+  // 次善の選択肢として使う）。母数が少なすぎると「相対的に」の比較自体が不安定なため、
+  // 判定材料が十分な科目が5科目以上ある場合のみ計算する
+  const confidentTotals = stockSnapshot
+    .map((s) => ({ subject: s.subject, total: attemptCountBySubject.get(s.subject) ?? 0 }))
+    .filter((s) => s.total >= CONFIDENCE_THRESHOLD);
+  const avgConfidentTotal =
+    confidentTotals.length > 0 ? confidentTotals.reduce((sum, s) => sum + s.total, 0) / confidentTotals.length : 0;
+  const underPracticedSubjects =
+    confidentTotals.length >= 5
+      ? confidentTotals
+          .filter((s) => s.total < avgConfidentTotal * 0.6)
+          .sort((a, b) => a.total - b.total)
+          .map((s) => s.subject)
+      : [];
+
+  // 実戦模試（一度も出題されていない問題での本番形式）の科目別正答率。演習モードの
+  // 「間違えたまま残っている問題」は復習で潰せば消えるが、実戦模試は毎回未知の問題
+  // なので、ここでの正答率の低さは演習だけでは見えない「未知の問題への対応力不足」を
+  // 直接示す、より強いシグナルになる。サンプルが1〜2問だとぶれが大きいため
+  // 最低3問以上答えている科目だけを対象にする
+  const examStatsBySubject = new Map<string, { correct: number; total: number }>();
+  for (const r of (examAttemptDetailRows.data ?? []) as unknown as {
+    is_correct: boolean;
+    questions: { subject: string } | null;
+  }[]) {
+    const subject = r.questions?.subject;
+    if (!subject) continue;
+    const s = examStatsBySubject.get(subject) ?? { correct: 0, total: 0 };
+    s.total++;
+    if (r.is_correct) s.correct++;
+    examStatsBySubject.set(subject, s);
+  }
+  const examWeakSubjects = [...examStatsBySubject.entries()]
+    .map(([subject, s]) => ({ subject, accuracy: s.correct / s.total, total: s.total }))
+    .filter((s) => s.total >= 3)
+    .sort((a, b) => a.accuracy - b.accuracy)
+    .slice(0, 3);
 
   let lastExamText = "まだ受験していません";
   let weakestInFailedGroup: string | null = null;
@@ -157,6 +208,8 @@ async function gatherState() {
     thinSubjects,
     avgUnserved,
     weakSubjects,
+    underPracticedSubjects,
+    examWeakSubjects,
     lastExamText,
     weakestInFailedGroup,
     remainingThisMonth,
@@ -194,6 +247,8 @@ export async function computeNextAction(): Promise<NextAction & { stateHash: str
     thinSubjects,
     avgUnserved,
     weakSubjects,
+    underPracticedSubjects,
+    examWeakSubjects,
     lastExamText,
     weakestInFailedGroup,
     remainingThisMonth,
@@ -225,12 +280,30 @@ export async function computeNextAction(): Promise<NextAction & { stateHash: str
         href: href("subject", weakestInFailedGroup),
       };
     }
+    if (examWeakSubjects.length > 0) {
+      const w = examWeakSubjects[0];
+      return {
+        action: "subject",
+        targetSubject: w.subject,
+        reason: `実戦模試の${w.subject}正答率が${Math.round(w.accuracy * 100)}%です`,
+        href: href("subject", w.subject),
+      };
+    }
     if (thinSubjects.length > 0) {
       return { action: "mock", targetSubject: null, reason: `ストックが薄い科目が${thinSubjects.length}件あります`, href: href("mock", null) };
     }
     if (weakSubjects.length > 0) {
       const w = weakSubjects[0];
       return { action: "subject", targetSubject: w.subject, reason: `${w.subject}が残り${w.currentWrong}問です`, href: href("subject", w.subject) };
+    }
+    if (underPracticedSubjects.length > 0) {
+      const subject = underPracticedSubjects[0];
+      return {
+        action: "subject",
+        targetSubject: subject,
+        reason: `${subject}は他科目より解答数が少なめです`,
+        href: href("subject", subject),
+      };
     }
     if (examFeasible) {
       return { action: "exam", targetSubject: null, reason: "実力を試すタイミングです", href: href("exam", null) };
@@ -261,7 +334,20 @@ ${feasibleActionsText}
 - 解答数が少なく（${CONFIDENCE_THRESHOLD}問未満）苦手かどうかまだ判断できない科目: ${lowConfidenceSubjects.length}科目${lowConfidenceSubjects.length > 0 ? `（${lowConfidenceSubjects.slice(0, 6).join("、")}）` : ""}
 - 科目別の新規ストック（未出題の問題数）: 平均${avgUnserved.toFixed(1)}問/科目。特に少ない科目: ${thinSubjects.length > 0 ? thinSubjects.join("、") : "無し"}
 - 今も間違えたまま残っている問題: 全体で${wrongProgress.currentWrong}問（これまで間違えた${wrongProgress.everMissed}問中）
-- 苦手科目トップ3（残り問題が多い順）: ${weakSubjects.length > 0 ? weakSubjects.slice(0, 3).map((s) => `${s.subject}(残り${s.currentWrong}問)`).join("、") : "無し"}
+- 苦手科目トップ3（演習中、間違えたまま残っている問題が多い順）: ${weakSubjects.length > 0 ? weakSubjects.slice(0, 3).map((s) => `${s.subject}(残り${s.currentWrong}問)`).join("、") : "無し"}
+- 解答数が少なく判断できない科目は、間違いの有無に関わらず未挑戦の科目と同列に最優先で
+  扱ってください。解答数が少ないうちに「苦手」と決めつけるのは判定として不安定です
+  （数問間違えた直後に3問連続正解しただけで「克服」判定されるなど、サンプルが少なすぎて
+  信頼できないため）。苦手科目トップ3への対応は、判断できない科目が無くなった後にしてください
+- 実戦模試（一度も出題されていない問題での本番形式）での科目別正答率が低い科目トップ3:
+  ${examWeakSubjects.length > 0 ? examWeakSubjects.map((s) => `${s.subject}(正答率${Math.round(s.accuracy * 100)}%・${s.total}問中)`).join("、") : "実戦模試のデータがまだ十分にありません"}
+- 実戦模試での正答率の低さは、演習で「間違えたまま残っている問題」が無くなっていても
+  「未知の問題への対応力が低い」ことを示す強いシグナルです。苦手科目トップ3が無い、または
+  対応済みでも、実戦模試での弱点科目が残っていれば優先的に科目別演習を勧めてください
+- 判定材料は十分(${CONFIDENCE_THRESHOLD}問以上)だが、他の科目に比べて解答数が相対的に
+  少ない科目: ${underPracticedSubjects.length > 0 ? underPracticedSubjects.slice(0, 5).join("、") : "無し"}
+  （未挑戦・データ不足・苦手科目・実戦模試での弱点のいずれも無い場合、この中から1科目を
+  選んでバランスよく演習量を底上げする提案をしてください）
 - 前回の実戦模試: ${lastExamText}
 - 実戦模試: ${examFeasible ? `受験可能（今月すでに${roundsThisMonth}回受験、残り${remainingThisMonth}回。今月はあと${daysLeftInMonth}日）` : startedToday ? "今日は既に新しい回を開始済み（1日1回まで。明日また受験可能）" : "現在は受験不可（問題ストック準備中、または今月の受験上限に到達）"}
 - 実戦模試は月5回までの限られた回数です。早い者勝ちで消費してよいものではなく、弱点克服が
