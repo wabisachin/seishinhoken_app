@@ -7,6 +7,7 @@ import type { Mode, Question } from "@/lib/types";
 import { getStoredProfile } from "@/lib/profile";
 import AllSubjectsQuiz from "./AllSubjectsQuiz";
 import ExplanationList from "./ExplanationList";
+import { scrollToTop } from "./scrollToTop";
 
 type Phase =
   | "resume-prompt"
@@ -361,6 +362,7 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
     const nextRecords = [...records, { question: q, selected, isCorrect: d.is_correct as boolean }];
     setRecords(nextRecords);
     setPhase("explaining");
+    scrollToTop();
     if (mode === "subject") {
       saveSubjectSession({
         subject,
@@ -375,6 +377,7 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
   }
 
   async function next() {
+    scrollToTop();
     if (mode === "subject") {
       if (records.length >= count) {
         clearSubjectSession();
@@ -593,7 +596,7 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
                 </button>
                 <div>
                   <p className="mb-0.5 text-sm font-medium text-stone-700">科目ごとに復習する</p>
-                  <p className="mb-2 text-xs text-stone-400">※3問連続で正解すると克服したとみなします</p>
+                  <p className="mb-2 text-xs text-stone-400">※同一の問題を3回連続で正解すると克服したとみなします</p>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     {reviewSubjects.map((s) => {
                       // ゴールまでの距離（あと何問でクリアか）で表示する。正答率は

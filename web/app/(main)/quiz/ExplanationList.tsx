@@ -26,15 +26,12 @@ export default function ExplanationList({
   // カード内など、カードの中にカードが二重に見えるのを避けるため）
   variant?: "card" | "inline";
 }) {
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  // 一度に開けるのは1つだけ（アコーディオン）。複数開けると根拠がどれも半端に見えて
+  // 読みにくいため、新しく開いたら前のものは自動的に閉じる
+  const [expanded, setExpanded] = useState<number | null>(null);
 
   const toggle = (chunkId: number) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(chunkId)) next.delete(chunkId);
-      else next.add(chunkId);
-      return next;
-    });
+    setExpanded((prev) => (prev === chunkId ? null : chunkId));
   };
 
   const dedupedCitations = citations ? dedupeCitations(citations) : [];
@@ -89,13 +86,13 @@ export default function ExplanationList({
                       >
                         根拠: {c.book} p.{c.page_start}
                         {c.page_end !== c.page_start ? `–${c.page_end}` : ""}
-                        {expanded.has(c.chunk_id) ? " －" : " ＋"}
+                        {expanded === c.chunk_id ? " －" : " ＋"}
                       </button>
                     ))}
                   </div>
                 )}
                 {related
-                  .filter((c) => expanded.has(c.chunk_id))
+                  .filter((c) => expanded === c.chunk_id)
                   .map((c) => {
                     const quote = c.quotes?.find((q) => q.option === i + 1)?.quote;
                     return (
@@ -129,7 +126,7 @@ export default function ExplanationList({
           </h3>
           <ul className={isCard ? "space-y-2" : "space-y-1.5"}>
             {generalCitations.map((c) => {
-              const isExpanded = expanded.has(c.chunk_id);
+              const isExpanded = expanded === c.chunk_id;
               return (
                 <li key={c.chunk_id} className="rounded-xl border border-stone-100">
                   <button

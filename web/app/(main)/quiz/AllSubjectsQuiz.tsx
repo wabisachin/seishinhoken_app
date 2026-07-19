@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { Question } from "@/lib/types";
 import { getStoredProfile } from "@/lib/profile";
 import ExplanationList from "./ExplanationList";
+import { scrollToTop } from "./scrollToTop";
 
 const SET_SIZE = 3;
 const STORAGE_KEY = "quiz_session_allsubjects_v1";
@@ -18,6 +19,10 @@ type Persisted = {
   questions: Question[];
   answers: Record<number, Answer>;
   setIndex: number;
+  // このセットを解答済みで解説を表示中か、まだ解答前か。resume()でどちらの画面に
+  // 戻すかを決めるために使う（無いと常に「answering」に戻ってしまい、解説を見ていた
+  // セットの解答状況とちぐはぐになる）
+  phase: "answering" | "explaining";
   savedAt: number;
 };
 
@@ -134,7 +139,11 @@ export default function AllSubjectsQuiz() {
 
   useEffect(() => {
     const persisted = loadPersisted();
-    const unfinished = persisted && Object.keys(persisted.answers).length < persisted.questions.length;
+    // 「読み込み済みの問題数」ではなく「全18問」を基準にする。読み込み済み分を
+    // 解答し終えた直後（explaining画面）は読み込み済み数=解答数になるが、全体は
+    // まだ終わっていないため、これをunfinished=falseと誤判定してリロード時に
+    // startFresh()で最初からやり直しになってしまっていた
+    const unfinished = persisted && Object.keys(persisted.answers).length < persisted.subjectOrder.length;
     if (unfinished) {
       setPendingResume(persisted);
       setPhase("resume-prompt");
@@ -174,7 +183,7 @@ export default function AllSubjectsQuiz() {
       setAnswers({});
       setSetIndex(0);
       setDraft({});
-      savePersisted({ subjectOrder: order, questions: firstSet, answers: {}, setIndex: 0, savedAt: Date.now() });
+      savePersisted({ subjectOrder: order, questions: firstSet, answers: {}, setIndex: 0, phase: "answering", savedAt: Date.now() });
       setPhase("answering");
       void runBackgroundRunner(order, SET_SIZE);
     } catch (e) {
@@ -190,7 +199,7 @@ export default function AllSubjectsQuiz() {
     setAnswers(pendingResume.answers);
     setSetIndex(pendingResume.setIndex);
     setDraft({});
-    setPhase("answering");
+    setPhase(pendingResume.phase ?? "answering");
     void runBackgroundRunner(pendingResume.subjectOrder, pendingResume.questions.length);
   }
 
@@ -236,8 +245,9 @@ export default function AllSubjectsQuiz() {
       const nextAnswers = { ...answers };
       for (const r of results) nextAnswers[r.id] = { selected: r.selected, isCorrect: r.isCorrect };
       setAnswers(nextAnswers);
-      savePersisted({ subjectOrder, questions, answers: nextAnswers, setIndex, savedAt: Date.now() });
+      savePersisted({ subjectOrder, questions, answers: nextAnswers, setIndex, phase: "explaining", savedAt: Date.now() });
       setPhase("explaining");
+      scrollToTop();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -271,8 +281,9 @@ export default function AllSubjectsQuiz() {
       setQuestions(nextQuestions);
       setSetIndex(nextIndex);
       setDraft({});
-      savePersisted({ subjectOrder, questions: nextQuestions, answers, setIndex: nextIndex, savedAt: Date.now() });
+      savePersisted({ subjectOrder, questions: nextQuestions, answers, setIndex: nextIndex, phase: "answering", savedAt: Date.now() });
       setPhase("answering");
+      scrollToTop();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setPhase("explaining");

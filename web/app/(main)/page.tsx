@@ -291,7 +291,7 @@ export default function Dashboard() {
               <p className="mt-1 text-sm text-stone-500">
                 これまで間違えた{everMissed}問のうち{everMissed - totalWrong}問を克服済み（{consumedPercent}%消化）
               </p>
-              <p className="mt-1 text-xs text-stone-400">※3問連続で正解すると克服したとみなします</p>
+              <p className="mt-1 text-xs text-stone-400">※同一の問題を3回連続で正解すると克服したとみなします</p>
             </div>
           </div>
         )}
@@ -302,7 +302,8 @@ export default function Dashboard() {
         <section className="rounded-2xl bg-white p-5 shadow-warm">
           <h2 className="mb-1 font-bold text-indigo-700">科目別弱点マップ</h2>
           <p className="mb-3 text-xs text-stone-400">
-            まだ何もわからない科目・データが少ない科目を優先表示。タップすると演習を始めます。
+            まだ何もわからない科目・データが少ない科目を優先表示。タップすると、既知の弱点は復習モード、
+            未挑戦・データ不足の科目は科目別演習が始まります。
           </p>
           <div className="space-y-1.5">
             {untouched.map((s) => (
@@ -329,18 +330,10 @@ export default function Dashboard() {
       <section className="rounded-2xl bg-white p-5 shadow-warm">
         <h2 className="mb-3 font-bold text-indigo-700">実戦模試の実力</h2>
         {!examSummary || examSummary.subjectsPracticed === 0 ? (
-          <div className="space-y-2 text-sm text-stone-600">
-            <p>
-              ここには実戦模試（本番と同じ形式・時間制限・一度も出題されていない問題だけで構成される模試）の
-              結果だけが表示されます。「未知の問題への対応力」を測るには、まず実戦模試を受けてみましょう。
-            </p>
-            <Link
-              href="/full-mock"
-              className="inline-flex min-h-12 items-center rounded-xl bg-indigo-600 px-5 py-3 font-medium text-white transition-colors hover:bg-indigo-700"
-            >
-              実戦模試を受けてみる
-            </Link>
-          </div>
+          <p className="text-sm text-stone-600">
+            ここには実戦模試（本番と同じ形式・時間制限・一度も出題されていない問題だけで構成される模試）の
+            結果だけが表示されます。まだ受験していないため、結果はまだありません。
+          </p>
         ) : (
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
