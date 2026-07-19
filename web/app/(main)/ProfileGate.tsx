@@ -4,14 +4,30 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { clearStoredProfile, getStoredProfile, setStoredProfile, type UserProfile } from "@/lib/profile";
 
+// 動作テスト用モードの案内ポップアップを一度閉じたら、以後は毎回出さない
+// （常時表示のバナーは邪魔だという指摘を受け、初回だけの案内に変更した）
+const TEST_NOTICE_DISMISSED_KEY = "test_mode_notice_dismissed";
+
 export default function ProfileGate({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null | "checking">("checking");
+  const [showTestNotice, setShowTestNotice] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
 
   useEffect(() => {
     setProfile(getStoredProfile());
   }, []);
+
+  useEffect(() => {
+    if (profile === "test" && !localStorage.getItem(TEST_NOTICE_DISMISSED_KEY)) {
+      setShowTestNotice(true);
+    }
+  }, [profile]);
+
+  function dismissTestNotice() {
+    localStorage.setItem(TEST_NOTICE_DISMISSED_KEY, "1");
+    setShowTestNotice(false);
+  }
 
   // 応援する人にとっての「ホーム」は成績ページ。ブックマークやPWAのアイコンなど、
   // ナビのタブを経由せずに直接「/」へ来た場合（アプリを閉じて開き直した時など）に
@@ -100,18 +116,35 @@ export default function ProfileGate({ children }: { children: React.ReactNode })
     );
   }
 
-  // 動作テスト用は本番データと見た目が同じだと誤認しやすいため、常時わかるバナーを出す
-  // （本人の学習データとはDB上完全に分離されているが、UI上でも明示しておく）
-  if (profile === "test") {
-    return (
-      <>
-        <div className="bg-amber-400 px-4 py-1.5 text-center text-xs font-bold text-amber-950">
-          動作テスト用モードです（本人の学習データとは分けて記録されます）
+  // 動作テスト用は本番データと見た目が同じだと誤認しやすいため、最初に一度だけ
+  // ポップアップで案内する（常時表示のバナーは邪魔という指摘を受け、×で閉じられる
+  // 案内に変更。本人の学習データとはDB上完全に分離されている旨をここで明示する）
+  return (
+    <>
+      {showTestNotice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="relative max-w-sm rounded-2xl bg-white p-5 shadow-warm-lg">
+            <button
+              onClick={dismissTestNotice}
+              aria-label="閉じる"
+              className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full text-stone-400 hover:bg-stone-100 hover:text-stone-600"
+            >
+              ×
+            </button>
+            <h2 className="pr-8 font-bold text-amber-700">動作テスト用モードです</h2>
+            <p className="mt-2 text-sm leading-relaxed text-stone-600">
+              本人の学習データとは分けて記録されます。安心して自由にお使いください。
+            </p>
+            <button
+              onClick={dismissTestNotice}
+              className="mt-4 min-h-11 w-full rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-white hover:bg-amber-600"
+            >
+              わかりました
+            </button>
+          </div>
         </div>
-        {children}
-      </>
-    );
-  }
-
-  return <>{children}</>;
+      )}
+      {children}
+    </>
+  );
 }
