@@ -2,6 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { EXAM_SUBJECT_COUNTS } from "@/lib/examFormat";
+
+const SUBJECT_PART: Record<string, "common" | "specialized"> = Object.fromEntries(
+  EXAM_SUBJECT_COUNTS.map((s) => [s.subject, s.part]),
+);
 
 type ReviewSubject = {
   subject: string;
@@ -173,6 +178,41 @@ function WeaknessRow({ s }: { s: ReviewSubject }) {
   return content;
 }
 
+// 共通科目/専門科目の1セクション分。優先度（未挑戦・データ不足 > 既知の弱点 > OK）は
+// 全体と同じ考え方をセクション内で適用する
+function WeaknessMapSection({ title, subjects }: { title: string; subjects: ReviewSubject[] }) {
+  if (subjects.length === 0) return null;
+  const untouched = subjects.filter((s) => categorize(s) === "untouched");
+  const lowConfidence = subjects.filter((s) => categorize(s) === "lowConfidence");
+  const needsReview = subjects.filter((s) => categorize(s) === "needsReview");
+  const confidentOk = subjects.filter((s) => categorize(s) === "confidentOk");
+  const SHOWN_CONFIDENT_OK = 3;
+  const shownConfidentOk = confidentOk.slice(0, SHOWN_CONFIDENT_OK);
+  const hiddenConfidentOkCount = confidentOk.length - shownConfidentOk.length;
+  return (
+    <div>
+      <h3 className="mb-1.5 text-xs font-bold text-stone-500">{title}</h3>
+      <div className="space-y-1.5">
+        {untouched.map((s) => (
+          <WeaknessRow key={s.subject} s={s} />
+        ))}
+        {lowConfidence.map((s) => (
+          <WeaknessRow key={s.subject} s={s} />
+        ))}
+        {needsReview.map((s) => (
+          <WeaknessRow key={s.subject} s={s} />
+        ))}
+        {shownConfidentOk.map((s) => (
+          <WeaknessRow key={s.subject} s={s} />
+        ))}
+      </div>
+      {hiddenConfidentOkCount > 0 && (
+        <p className="mt-1.5 text-xs text-stone-400">ほか{hiddenConfidentOkCount}科目は順調です</p>
+      )}
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const [reviewSubjects, setReviewSubjects] = useState<ReviewSubject[] | null>(null);
   const [everMissed, setEverMissed] = useState(0);
@@ -237,15 +277,11 @@ export default function Dashboard() {
   }, []);
 
   const consumedPercent = everMissed > 0 ? Math.round((100 * (everMissed - totalWrong)) / everMissed) : null;
-  // 表示優先度: 未挑戦・データ不足（まだ何もわからない＝本番で不意打ちを食らうリスク）
-  // > 既知の弱点（対処法が明確）> 十分なデータがあってOKな科目（下に畳む）
-  const untouched = (reviewSubjects ?? []).filter((s) => categorize(s) === "untouched");
-  const lowConfidence = (reviewSubjects ?? []).filter((s) => categorize(s) === "lowConfidence");
-  const needsReview = (reviewSubjects ?? []).filter((s) => categorize(s) === "needsReview");
-  const confidentOk = (reviewSubjects ?? []).filter((s) => categorize(s) === "confidentOk");
-  const SHOWN_CONFIDENT_OK = 4;
-  const shownConfidentOk = confidentOk.slice(0, SHOWN_CONFIDENT_OK);
-  const hiddenConfidentOkCount = confidentOk.length - shownConfidentOk.length;
+  // 弱点マップは共通科目/専門科目で分けて表示する（本番の午前/午後の区分と揃える）。
+  // セクション内の優先度: 未挑戦・データ不足（まだ何もわからない＝本番で不意打ちを
+  // 食らうリスク）> 既知の弱点（対処法が明確）> 十分なデータがあってOKな科目（下に畳む）
+  const commonSubjects = (reviewSubjects ?? []).filter((s) => SUBJECT_PART[s.subject] === "common");
+  const specializedSubjects = (reviewSubjects ?? []).filter((s) => SUBJECT_PART[s.subject] === "specialized");
 
   return (
     <div className="space-y-6">
@@ -324,27 +360,13 @@ export default function Dashboard() {
         <section className="rounded-2xl bg-white p-5 shadow-warm">
           <h2 className="mb-1 font-bold text-indigo-700">科目別弱点マップ</h2>
           <p className="mb-3 text-xs text-stone-400">
-            まだ何もわからない科目・データが少ない科目を優先表示。タップすると、既知の弱点は復習モード、
+            未挑戦・データ不足の科目を優先表示。タップすると、既知の弱点は復習モード、
             未挑戦・データ不足の科目は科目別演習が始まります。
           </p>
-          <div className="space-y-1.5">
-            {untouched.map((s) => (
-              <WeaknessRow key={s.subject} s={s} />
-            ))}
-            {lowConfidence.map((s) => (
-              <WeaknessRow key={s.subject} s={s} />
-            ))}
-            {needsReview.map((s) => (
-              <WeaknessRow key={s.subject} s={s} />
-            ))}
-            {shownConfidentOk.map((s) => (
-              <WeaknessRow key={s.subject} s={s} />
-            ))}
+          <div className="space-y-5">
+            <WeaknessMapSection title="共通科目" subjects={commonSubjects} />
+            <WeaknessMapSection title="専門科目" subjects={specializedSubjects} />
           </div>
-          {hiddenConfidentOkCount > 0 && (
-            <p className="mt-2 text-xs text-stone-400">ほか{hiddenConfidentOkCount}科目は順調です</p>
-          )}
-          {reviewSubjects.length === 0 && <p className="text-sm text-stone-500">まだ演習データがありません。</p>}
         </section>
       )}
 
