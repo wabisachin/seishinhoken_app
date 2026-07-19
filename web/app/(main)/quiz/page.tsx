@@ -76,11 +76,10 @@ function clearSubjectSession() {
 
 type ReviewSubjectSummary = {
   subject: string;
-  correct: number;
   total: number;
   wrongCount: number;
   everMissed: number;
-  accuracy: number | null;
+  poolFull: boolean;
 };
 
 // review-summaryは全科目（克服済みも含む）を返すため、復習モードの選択肢としては

@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { getStoredProfile, type UserProfile } from "@/lib/profile";
+import GuardianView from "./GuardianView";
 
 type Summary = {
   thisMonth: string;
@@ -48,12 +50,17 @@ function formatMonthShort(month: string) {
 }
 
 export default function StatsPage() {
+  const [profile, setProfile] = useState<UserProfile | null | "checking">("checking");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [bySubjectThisMonth, setBySubjectThisMonth] = useState<SubjectStat[]>([]);
   const [byKindThisMonth, setByKindThisMonth] = useState<KindStat[]>([]);
   const [monthly, setMonthly] = useState<MonthlyRow[]>([]);
   const [bySubjectMonthly, setBySubjectMonthly] = useState<SubjectMonthlyRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setProfile(getStoredProfile());
+  }, []);
 
   useEffect(() => {
     fetch("/api/stats")
@@ -68,8 +75,11 @@ export default function StatsPage() {
           setBySubjectMonthly(d.bySubjectMonthly ?? []);
         }
       })
-      .catch((e) => setError(String(e)));
+      .catch(() => setError("データの読み込みに失敗しました。時間をおいて再度お試しください。"));
   }, []);
+
+  if (profile === "checking") return null;
+  if (profile === "guardian") return <GuardianView />;
 
   if (error) return <p className="rounded bg-red-100 p-3 text-sm text-red-700">{error}</p>;
   if (!summary) return null;

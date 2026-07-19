@@ -8,7 +8,7 @@ import { EXAM_SUBJECT_COUNTS, EXAM_STOCK_SESSIONS_AHEAD, ExamPart } from "./exam
 // 累積アクティブ数がこれ未満の間は、ストック補充のたびに必ず新規生成する
 const FULL_GENERATION_UNTIL = 50;
 // これに達したら新規生成を止め、以降はプールからの再出題のみにする
-const SUBJECT_TARGET = 200;
+export const SUBJECT_TARGET = 200;
 // 却下(rejected)も安全弁の分母に数える。却下ばかりの科目でも必ずここで新規生成が止まる。
 // アクティブ数がSUBJECT_TARGETに届かなくても、総試行数がここに達したら諦める。
 const HARD_CAP_TOTAL = 250;

@@ -3,33 +3,24 @@ import { supabase } from "@/lib/supabase";
 import { logError } from "@/lib/errorLog";
 import { getWrongStockProgress, getWrongStockProgressBySubject } from "@/lib/reviewStock";
 import { listSubjects } from "@/lib/subjects";
-
-// 苦手科目の「今の」優先度を測る窓。数ヶ月前に苦手だった科目がその後克服されても
-// 全期間累積だと正答率が低いまま表示され続け、逆に最近伸び悩んでいる科目が過去の
-// 貯金で高く出てしまう問題を避けるため、直近N件の解答だけで正答率を判定する
-// （弱点ストック＝復習対象の問題数そのものは、後述の通り全期間で判定して別に保持する）。
-const RECENT_WINDOW = 30;
+import { getStockSnapshot, SUBJECT_TARGET } from "@/lib/questionSupply";
 
 /**
  * 復習モードの科目選択画面・ホーム画面の弱点マップ用。全科目（過去問+タクソノミーの
- * 和集合）を対象に、科目ごとの正答率（直近RECENT_WINDOW件の解答ベース）と弱点ストック
- * 件数を返す。呼び出し側で用途に応じてフィルタする（復習モードの選択肢は
- * wrongCount > 0 の科目だけに絞る。ホーム画面の弱点マップは克服済み科目も含めて
- * 全科目を表示する）。
- * 苦手科目の判定は間違えた問題数の絶対数ではなく正答率で行うのが正確なため
- * （出題数が多い科目ほど間違えた問題数も単純に多くなりがちなことへの対策）。
- * 併せて「何問中何問正解」も返し、率だけでなく実数もユーザーに分かるようにする。
+ * 和集合）を対象に、科目ごとの解答数・弱点ストック件数・出題プールが上限
+ * （SUBJECT_TARGET問）まで生成し切っているかを返す。呼び出し側で用途に応じてフィルタする
+ * （復習モードの選択肢は wrongCount > 0 の科目だけに絞る。ホーム画面の弱点マップは
+ * 克服済み科目も含めて全科目を表示する）。
+ * 苦手科目の判定は正答率ではなく「間違えたまま残っている問題の総数」で行う
+ * （このアプリの学習ゴールは、一度間違えた問題を同一問題で3回連続正解させて
+ * 克服することであり、正答率という統計量で評価するものではないため）。
  */
 export async function GET() {
   try {
-    const sb = supabase();
-    const [{ data: attempts, error }, allSubjects] = await Promise.all([
-      sb
-        .from("attempts")
-        .select("question_id, is_correct, answered_at, questions!inner(subject)")
-        .eq("profile", "self")
-        .order("answered_at", { ascending: false }),
+    const [{ data: attempts, error }, allSubjects, stockSnapshot] = await Promise.all([
+      supabase().from("attempts").select("questions!inner(subject)").eq("profile", "self"),
       listSubjects(),
+      getStockSnapshot(),
     ]);
     if (error) throw new Error(error.message);
 
@@ -40,39 +31,37 @@ export async function GET() {
     const [progress, progressBySubject] = await Promise.all([getWrongStockProgress(), getWrongStockProgressBySubject()]);
     const totalWrong = progress.currentWrong;
 
-    // 一方、「今どの科目を優先すべきか」の正答率ランキングは直近RECENT_WINDOW件のみで見る
-    const recentBySubject = new Map<string, boolean[]>();
+    // 解答数は全期間の総数（窓で区切らない）。正答率は使わないため区切る必要が無く、
+    // 「これまで何問解いたか」という素朴な累計こそがユーザーに見せたい数字のため
+    const totalBySubject = new Map<string, number>();
     for (const a of attempts ?? []) {
       const subject = (a.questions as unknown as { subject: string } | null)?.subject;
       if (!subject) continue;
-      const recent = recentBySubject.get(subject) ?? [];
-      if (recent.length < RECENT_WINDOW) {
-        recent.push(a.is_correct as boolean);
-        recentBySubject.set(subject, recent);
-      }
+      totalBySubject.set(subject, (totalBySubject.get(subject) ?? 0) + 1);
     }
+    const activeBySubject = new Map(stockSnapshot.map((s) => [s.subject, s.active]));
 
     const subjects = allSubjects
       .map((subject) => {
-        const recent = recentBySubject.get(subject) ?? [];
-        const correct = recent.filter(Boolean).length;
-        const total = recent.length;
+        const total = totalBySubject.get(subject) ?? 0;
         const subjectProgress = progressBySubject.get(subject) ?? { everMissed: 0, currentWrong: 0 };
         return {
           subject,
-          correct,
           total,
           wrongCount: subjectProgress.currentWrong,
           everMissed: subjectProgress.everMissed,
-          // まだ一度も解いていない科目はnull（0%と紛らわしいため区別する）
-          accuracy: total > 0 ? Math.round((100 * correct) / total) : null,
+          // 出題プールがSUBJECT_TARGET問まで生成し切っている（＝この科目で今後
+          // 新しい問題が増える余地がほぼ無い）かどうか。wrongCount=0と組み合わせて
+          // 「この科目は完全制覇した」の判定に使う
+          poolFull: (activeBySubject.get(subject) ?? 0) >= SUBJECT_TARGET,
         };
       })
       .sort((a, b) => {
         const aNeedsReview = a.wrongCount > 0;
         const bNeedsReview = b.wrongCount > 0;
         if (aNeedsReview !== bNeedsReview) return aNeedsReview ? -1 : 1;
-        return (a.accuracy ?? 100) - (b.accuracy ?? 100);
+        if (aNeedsReview) return b.wrongCount - a.wrongCount;
+        return a.total - b.total;
       });
 
     return NextResponse.json({ subjects, totalWrong, everMissed: progress.everMissed });

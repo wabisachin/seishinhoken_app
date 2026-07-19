@@ -10,11 +10,10 @@ const SUBJECT_PART: Record<string, "common" | "specialized"> = Object.fromEntrie
 
 type ReviewSubject = {
   subject: string;
-  correct: number;
   total: number;
   wrongCount: number;
   everMissed: number;
-  accuracy: number | null;
+  poolFull: boolean;
 };
 type ExamSummary = {
   thisMonth: string;
@@ -78,9 +77,13 @@ function ProgressRing({ percent, size = 96 }: { percent: number; size?: number }
 // リスクが高い（本番で不意に0点科目群を引く恐れがある）ため、未挑戦・データが薄い科目を
 // 既知の弱点より上位に表示する
 type MapCategory = "untouched" | "needsReview" | "confidentOk";
-// これ未満の解答数では、正答率・弱点判定の意味が薄いとみなす絶対的な目安。
-// review-summary APIの直近件数の窓(RECENT_WINDOW=30)と揃えている
+// これ未満の解答数では、まだ試していない問題に弱点が隠れている可能性が高いとみなす
+// 絶対的な目安（lib/nextAction.tsのCONFIDENCE_THRESHOLDと意図的に同じ値を独立に持つ）
 const CONFIDENCE_THRESHOLD = 30;
+// 科目ごとの出題プールの上限（lib/questionSupply.tsのSUBJECT_TARGETと同じ値）。
+// サーバー専用のそちらは直接importできないためここでも独立に持つ。この問題数まで
+// 生成し切り、かつ弱点が0件になったら「PERFECT」表示にする
+const SUBJECT_TARGET = 200;
 
 function categorize(s: ReviewSubject): MapCategory {
   if (s.total === 0) return "untouched";
@@ -108,18 +111,44 @@ function WeaknessRow({ s, medianTotal }: { s: ReviewSubject; medianTotal: number
   const category = categorize(s);
   const thin = isDataThin(s, medianTotal);
   const cleared = Math.max(0, s.everMissed - s.wrongCount);
+  // 出題プールが上限まで生成し切られ(poolFull)、かつ今は間違えたまま残っている問題が
+  // 無い(confidentOk)状態。その科目で作られ得る問題を全て克服したという最終ゴールなので、
+  // 普段の緑「OK」バッジとは別格の特別な見た目にする
+  const isPerfect = category === "confidentOk" && s.poolFull;
 
-  // バーは全カテゴリ共通で「解答数の蓄積度」を表す（0〜CONFIDENCE_THRESHOLD問で0→100%、
-  // 克服済みは満タン）。以前はカテゴリごとに異なる指標（克服率・解答数比率など）を使って
-  // いたため、科目によってバーの意味がバラバラで長さも比較しにくかった
-  const barPercent = category === "confidentOk" ? 100 : Math.round(Math.min(1, s.total / CONFIDENCE_THRESHOLD) * 100);
-  const barColor = category === "needsReview" ? "bg-red-400" : category === "untouched" ? "bg-stone-200" : "bg-green-500";
+  // 間違えたまま残っている問題がある科目(needsReview)は、バーを「これまで間違えた
+  // 問題のうち、克服できた問題の割合」にする。克服が進むほど赤→黄→緑に変わり、
+  // 見た目の変化がそのまま進捗の実感になるようにする。それ以外の科目は「解答数の
+  // 蓄積度」（0〜CONFIDENCE_THRESHOLD問で0→100%）、克服済み・克服のしようが無い
+  // (never missed)科目は満タン表示にする
+  const clearedRate = s.everMissed > 0 ? cleared / s.everMissed : 1;
+  const barPercent =
+    category === "needsReview"
+      ? Math.round(clearedRate * 100)
+      : category === "confidentOk"
+        ? 100
+        : Math.round(Math.min(1, s.total / CONFIDENCE_THRESHOLD) * 100);
+  const barColor = isPerfect
+    ? "bg-gradient-to-r from-amber-300 via-yellow-200 to-amber-400"
+    : category === "needsReview"
+      ? clearedRate < 0.34
+        ? "bg-red-500"
+        : clearedRate < 0.67
+          ? "bg-amber-500"
+          : "bg-green-500"
+      : category === "untouched"
+        ? "bg-stone-200"
+        : "bg-green-500";
 
   const badge =
     category === "needsReview" ? (
       <span className="shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-700">残り{s.wrongCount}問</span>
     ) : category === "untouched" ? (
       <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">未挑戦</span>
+    ) : isPerfect ? (
+      <span className="shrink-0 rounded-full bg-gradient-to-r from-amber-300 via-yellow-200 to-amber-400 px-2 py-0.5 text-xs font-extrabold text-amber-900 shadow-sm">
+        ✨ PERFECT
+      </span>
     ) : (
       <span className="shrink-0 rounded-full bg-green-100 px-2 py-0.5 text-xs font-bold text-green-700">OK</span>
     );
@@ -131,21 +160,24 @@ function WeaknessRow({ s, medianTotal }: { s: ReviewSubject; medianTotal: number
       : `/quiz?mode=subject&subject=${encodeURIComponent(s.subject)}`;
 
   const row = (
-    <div className={`flex items-center gap-2 rounded-xl p-2.5 transition-colors ${clickable ? "bg-white shadow-warm-sm hover:bg-indigo-50" : "opacity-50"}`}>
+    <div
+      className={`flex items-center gap-2 rounded-xl p-2.5 transition-colors ${
+        clickable
+          ? "bg-white shadow-warm-sm hover:bg-indigo-50"
+          : isPerfect
+            ? "bg-gradient-to-r from-amber-50 via-yellow-50 to-amber-50 shadow-warm-sm"
+            : "opacity-50"
+      }`}
+    >
       <span className="w-28 shrink-0 truncate text-sm text-stone-700 sm:w-36">{s.subject}</span>
       <div className="h-2 flex-1 overflow-hidden rounded-full bg-stone-100">
         <div className={`h-full rounded-full ${barColor}`} style={{ width: `${barPercent}%` }} />
       </div>
       <div className="flex shrink-0 items-center gap-1">
-        {thin && (
-          <span
-            className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-amber-400 text-[10px] font-bold leading-none text-white"
-            title="解答数がまだ少なく、間違えた問題がまだ見つかっていないだけの可能性があります"
-          >
-            ！
-          </span>
-        )}
         {badge}
+        {/* 詳細ボタン。以前は「解答数が薄い」の！マークと別に並んでいて紛らわしく
+            誤タップも招いていたため1つに統合した。薄い場合は黄色で目立たせつつ、
+            押すと詳細（解答数・克服数・薄いことの説明）が開く、という一貫した動作にする */}
         <button
           type="button"
           onClick={(e) => {
@@ -153,10 +185,13 @@ function WeaknessRow({ s, medianTotal }: { s: ReviewSubject; medianTotal: number
             e.stopPropagation();
             setShowDetail((v) => !v);
           }}
-          aria-label="詳細を見る"
-          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-stone-400 transition-colors hover:bg-stone-100"
+          aria-label={thin ? "解答数が少ない科目の詳細を見る" : "詳細を見る"}
+          title={thin ? "解答数がまだ少なく、まだ遭遇していない問題にも弱点が隠れている可能性があります" : undefined}
+          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs transition-colors ${
+            thin ? "bg-amber-400 font-bold text-white hover:bg-amber-500" : "text-stone-400 hover:bg-stone-100"
+          }`}
         >
-          <span className="text-xs">ⓘ</span>
+          ⓘ
         </button>
       </div>
     </div>
@@ -179,9 +214,14 @@ function WeaknessRow({ s, medianTotal }: { s: ReviewSubject; medianTotal: number
               克服: {cleared}/{s.everMissed}問
             </p>
           )}
+          {isPerfect && (
+            <p className="font-medium text-amber-700">
+              ✨ この科目で作成され得る問題（全{SUBJECT_TARGET}問）をすべて克服しました！
+            </p>
+          )}
           {thin && (
             <p className="text-amber-700">
-              解答数がまだ少なく（目安{CONFIDENCE_THRESHOLD}問、または他科目の解答数の中央値の半分）、プールの中の未着手の問題にまだ弱点が隠れている可能性があります。優先して演習することをおすすめします。
+              解答数がまだ少なく（目安{CONFIDENCE_THRESHOLD}問、または他科目の解答数の中央値の半分）、まだ遭遇していない未知の問題が多く残っています。そこにまだ弱点が隠れている可能性があります。優先して演習することをおすすめします。
             </p>
           )}
         </div>
@@ -383,8 +423,9 @@ export default function Dashboard() {
             <span className="text-xs font-normal text-stone-400">全体で計{totalAnsweredOverall}問解答</span>
           </h2>
           <p className="mb-3 text-xs text-stone-400">
-            未挑戦・解答数が少ない科目（！マーク）を優先表示。タップすると、既知の弱点は
-            復習モード、それ以外は科目別演習が始まります。ⓘで詳細を表示できます。
+            未挑戦・解答数が少ない科目を優先表示。タップすると、解答数が少ない科目は
+            科目別演習、解答数が十分で間違えた問題が残っている科目は復習モードが始まります。
+            ⓘで詳細を表示できます。
           </p>
           <div className="space-y-5">
             <WeaknessMapSection title="共通科目" subjects={commonSubjects} medianTotal={medianTotal} />
