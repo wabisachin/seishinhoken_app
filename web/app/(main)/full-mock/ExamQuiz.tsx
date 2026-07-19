@@ -517,11 +517,19 @@ export default function ExamQuiz() {
           残り {formatClock(Math.max(0, remainingSeconds))}
         </span>
       </div>
-      <div className="flex items-center justify-between text-sm text-stone-500">
-        <span>
-          {page + 1} / {subjectOrder.length} 分野目
-          <span className="ml-3 rounded bg-stone-200 px-2 py-0.5 text-xs">{subjectOrder[page]}</span>
-        </span>
+      <div>
+        <div className="flex items-center justify-between text-sm text-stone-500">
+          <span>
+            {page + 1} / {subjectOrder.length} 分野目
+            <span className="ml-3 rounded bg-stone-200 px-2 py-0.5 text-xs">{subjectOrder[page]}</span>
+          </span>
+        </div>
+        <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-stone-200">
+          <div
+            className="h-full rounded-full bg-indigo-500 transition-all"
+            style={{ width: `${Math.round((100 * (page + 1)) / subjectOrder.length)}%` }}
+          />
+        </div>
       </div>
 
       {pageQuestions.map((q) => {
