@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { describeFailedGroups } from "@/lib/examFormat";
 
 type SubjectScore = { subject: string; correct: number; total: number };
 type Verdict = {
@@ -144,7 +145,7 @@ export default function GuardianView() {
 
             {zeroGroupsThisMonth.length > 0 && (
               <p className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-700">
-                今月、1問も正解できなかった科目群がありました: {zeroGroupsThisMonth.join("、")}
+                今月、1問も正解できなかった科目群がありました: {describeFailedGroups(zeroGroupsThisMonth)}
                 （本番ではここが1つでもあると総得点に関係なく不合格になります）
               </p>
             )}

@@ -55,3 +55,17 @@ export const EXAM_MONTHLY_LIMIT = 5;
 export function subjectsForPart(part: ExamPart): { subject: string; questions: number }[] {
   return EXAM_SUBJECT_COUNTS.filter((s) => s.part === part).map((s) => ({ subject: s.subject, questions: s.questions }));
 }
+
+/**
+ * verdict.failedGroups（["⑤", "⑥"]のような番号だけの配列）は、番号が何の科目群を
+ * 指すのか利用者にはわからない。表示するときは必ずこれを通し、科目名を添える
+ * （例: "⑤（精神障害リハビリテーション論・精神保健福祉制度論）"）。
+ */
+export function describeFailedGroups(labels: string[]): string {
+  return labels
+    .map((label) => {
+      const group = EXAM_SUBJECT_GROUPS.find((g) => g.label === label);
+      return group ? `${label}（${group.subjects.join("・")}）` : label;
+    })
+    .join("、");
+}

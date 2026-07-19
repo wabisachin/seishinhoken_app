@@ -9,7 +9,7 @@ import { logError } from "./errorLog";
 import { getStockSnapshot, getExamReadyRounds } from "./questionSupply";
 import { getWrongStockProgress, getWrongStockProgressBySubject } from "./reviewStock";
 import { countRoundsThisMonth, hasStartedRoundToday, computePartResult, computeVerdict, ExamAttemptRow } from "./examMode";
-import { EXAM_MONTHLY_LIMIT, EXAM_SUBJECT_GROUPS } from "./examFormat";
+import { describeFailedGroups, EXAM_MONTHLY_LIMIT, EXAM_SUBJECT_GROUPS } from "./examFormat";
 
 export type NextAction = {
   action: "subject" | "review" | "mock" | "exam";
@@ -199,7 +199,7 @@ async function gatherState(pendingResume: PendingResumeInfo | null) {
 
     lastExamText = verdict.passed
       ? `${daysSince}日前に受験し合格ライン到達（総得点率${Math.round(verdict.overallRate * 100)}%）`
-      : `${daysSince}日前に受験し不合格（0点の科目群: ${verdict.failedGroups.join("、") || "無し"}、総得点率${Math.round(verdict.overallRate * 100)}%）`;
+      : `${daysSince}日前に受験し不合格（0点の科目群: ${describeFailedGroups(verdict.failedGroups) || "無し"}、総得点率${Math.round(verdict.overallRate * 100)}%）`;
   }
 
   const remainingThisMonth = Math.max(0, EXAM_MONTHLY_LIMIT - roundsThisMonth);

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { Question } from "@/lib/types";
-import type { ExamPart } from "@/lib/examFormat";
+import { describeFailedGroups, type ExamPart } from "@/lib/examFormat";
 
 const PART_LABEL: Record<ExamPart, string> = { common: "午前の部（共通科目）", specialized: "午後の部（専門科目）" };
 
@@ -61,7 +61,8 @@ export default function ExamQuiz() {
   // /api/exam/history（既存API、以前はGuardianView.tsxからしか使われていなかった）を
   // 使って一覧から後からいつでも同じ詳細画面を開けるようにする
   const [history, setHistory] = useState<HistoryEntry[] | null>(null);
-  const [viewingHistory, setViewingHistory] = useState(false);
+  // 「第何回を、いつ受けたものか」の見出し用。null以外なら過去の回の詳細を見ている状態
+  const [viewingHistoryLabel, setViewingHistoryLabel] = useState<string | null>(null);
 
   const finishingRef = useRef(false);
 
@@ -94,7 +95,7 @@ export default function ExamQuiz() {
     void loadHistory();
   }, []);
 
-  async function openHistoryDetail(entry: HistoryEntry) {
+  async function openHistoryDetail(entry: HistoryEntry, roundNumber: number) {
     setError(null);
     setPhase("starting");
     try {
@@ -104,7 +105,7 @@ export default function ExamQuiz() {
       setFinalQuestions((d.questions ?? []) as ExamQuestion[]);
       setVerdict(entry.verdict);
       setExpandedSubject(null);
-      setViewingHistory(true);
+      setViewingHistoryLabel(`第${roundNumber}回（${new Date(entry.completedAt).toLocaleDateString("ja-JP")}受験）`);
       setPhase("final-result");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -280,11 +281,13 @@ export default function ExamQuiz() {
         const allData = await allRes.json();
         setFinalQuestions((allData.questions ?? []) as ExamQuestion[]);
         setVerdict(d.verdict);
+        setViewingHistoryLabel(null);
         setPhase("final-result");
       } else {
         setPhase("part-result");
       }
       void loadState();
+      void loadHistory();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setPhase("error");
@@ -338,7 +341,7 @@ export default function ExamQuiz() {
         {history.map((h) => (
           <button
             key={h.examAttemptId}
-            onClick={() => void openHistoryDetail(h)}
+            onClick={() => void openHistoryDetail(h, roundNumberById.get(h.examAttemptId) ?? 0)}
             className="flex w-full items-center justify-between gap-3 rounded-2xl bg-white p-4 text-left shadow-warm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-warm-lg"
           >
             <div>
@@ -464,7 +467,7 @@ export default function ExamQuiz() {
     const rows = [...bySubjectMap.values()].sort((a, b) => a.correct / Math.max(a.total, 1) - b.correct / Math.max(b.total, 1));
     return (
       <div className="space-y-4">
-        <h1 className="text-xl font-bold">{viewingHistory ? "過去の受験結果" : "実戦模試 結果"}</h1>
+        <h1 className="text-xl font-bold">{viewingHistoryLabel ?? "実戦模試 結果"}</h1>
         <div className={`rounded-2xl p-6 text-center shadow-warm ${verdict.passed ? "bg-green-50" : "bg-red-50"}`}>
           <p className={`text-2xl font-bold ${verdict.passed ? "text-green-700" : "text-red-700"}`}>
             {verdict.passed ? "合格ライン到達" : "不合格ライン"}
@@ -474,7 +477,7 @@ export default function ExamQuiz() {
           </p>
           <p className="mt-1 text-stone-600">総合得点率 {Math.round(verdict.overallRate * 100)}%</p>
           {verdict.failedGroups.length > 0 && (
-            <p className="mt-2 text-sm text-red-700">0点の科目群: {verdict.failedGroups.join("、")}</p>
+            <p className="mt-2 text-sm text-red-700">0点の科目群: {describeFailedGroups(verdict.failedGroups)}</p>
           )}
         </div>
 

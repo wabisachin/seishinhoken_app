@@ -152,38 +152,43 @@ export default function StatsPage() {
       </section>
 
       {(() => {
-        if (!history) return null;
+        if (!history || history.length === 0) return null;
         const thisMonth = new Date().toISOString().slice(0, 7);
         const thisMonthRounds = history.filter((h) => h.completedAt.slice(0, 7) === thisMonth);
-        if (thisMonthRounds.length === 0) return null;
         const passCount = thisMonthRounds.filter((h) => h.verdict.passed).length;
         const totalCorrectSum = thisMonthRounds.reduce((sum, h) => sum + h.verdict.totalCorrect, 0);
         const totalQuestionsSum = thisMonthRounds.reduce((sum, h) => sum + h.verdict.totalQuestions, 0);
         const overallRate = totalQuestionsSum > 0 ? Math.round((100 * totalCorrectSum) / totalQuestionsSum) : null;
-        const sortedAsc = [...thisMonthRounds].sort((a, b) => a.completedAt.localeCompare(b.completedAt));
+        // 一覧は全期間ぶん・新しい回ほど上にすぐ確認できる並び（historyはAPI側で新しい順に
+        // 返ってくる）。回番号だけは古い順に振る（第1回が一番最初に受けた回になるように）
         const allSortedAsc = [...history].sort((a, b) => a.completedAt.localeCompare(b.completedAt));
         const roundNumberById = new Map(allSortedAsc.map((h, i) => [h.examAttemptId, i + 1]));
         return (
           <section className="rounded-2xl bg-white p-5 shadow-warm">
-            <h2 className="mb-3 font-bold text-indigo-700">{formatMonth(thisMonth)}の回ごとの結果</h2>
-            <div className="mb-3 grid grid-cols-3 gap-3 text-center">
-              <div>
-                <p className="text-2xl font-bold text-stone-800">{thisMonthRounds.length}回</p>
-                <p className="text-xs text-stone-500">受験回数</p>
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-green-600">{passCount}回</p>
-                <p className="text-xs text-stone-500">合格</p>
-              </div>
-              <div>
-                <p className={`text-2xl font-bold ${overallRate !== null && overallRate >= 60 ? "text-green-600" : "text-red-600"}`}>
-                  {overallRate}%
-                </p>
-                <p className="text-xs text-stone-500">合算得点率</p>
-              </div>
-            </div>
+            <h2 className="mb-1 font-bold text-indigo-700">回ごとの結果</h2>
+            {thisMonthRounds.length > 0 && (
+              <>
+                <p className="mb-3 text-xs text-stone-400">{formatMonth(thisMonth)}のまとめ</p>
+                <div className="mb-3 grid grid-cols-3 gap-3 text-center">
+                  <div>
+                    <p className="text-2xl font-bold text-stone-800">{thisMonthRounds.length}回</p>
+                    <p className="text-xs text-stone-500">受験回数</p>
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-green-600">{passCount}回</p>
+                    <p className="text-xs text-stone-500">合格</p>
+                  </div>
+                  <div>
+                    <p className={`text-2xl font-bold ${overallRate !== null && overallRate >= 60 ? "text-green-600" : "text-red-600"}`}>
+                      {overallRate}%
+                    </p>
+                    <p className="text-xs text-stone-500">合算得点率</p>
+                  </div>
+                </div>
+              </>
+            )}
             <div className="space-y-1.5">
-              {sortedAsc.map((h) => (
+              {history.map((h) => (
                 <div key={h.examAttemptId} className="flex items-center justify-between gap-2 rounded-xl bg-stone-50 p-2.5">
                   <span className="text-sm font-medium text-stone-700">第{roundNumberById.get(h.examAttemptId)}回</span>
                   <span className="text-xs text-stone-400">{new Date(h.completedAt).toLocaleDateString("ja-JP")}</span>
