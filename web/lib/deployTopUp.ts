@@ -1,19 +1,21 @@
 /**
- * instrumentation.tsのregister()はサーバーインスタンス起動直後の特殊な実行コンテキストで
- * 動くため、その場でSupabase等へのfetchを行うと不安定（実際に"TypeError: fetch failed"を
- * 確認済み）。そのためregister()ではこのフラグを立てるだけにし、実際のネットワーク処理は
- * 最初の本物のリクエストを処理するmiddleware.ts側（通常のリクエストコンテキストで
- * fetchが確実に使える）に任せる。
+ * デプロイ直後の全科目ストック補充を「1インスタンスにつき高々1回だけ試みる」ための
+ * 純粋な最適化フラグ。以前はinstrumentation.tsのregister()（コールドスタート時に
+ * 1度だけ呼ばれる）で立てたフラグをmiddleware.tsが読む2段構成だったが、Vercel上では
+ * register()とmiddleware.tsが同じモジュール状態（このファイルのモジュールスコープ変数）を
+ * 共有しているとは限らず、実際に直近10回のデプロイで一度もクレーム（app_settings.
+ * last_topup_deployment_id の更新）が成功していないことが判明した。
+ *
+ * そのため、middleware.ts単体で完結する方式に変更する。正しさ自体は
+ * questionSupply.tsのclaimDeploymentTopUp()（app_settingsへの原子的なUPDATE）が
+ * 担保しており、複数インスタンス・複数リクエストから重複して呼ばれても実害は無い
+ * （最初の1回だけが実際にトップアップを実行する）。このフラグは「同じインスタンスの
+ * 2回目以降のリクエストで毎回無駄なDB問い合わせを発生させない」ための軽量な間引きに過ぎない。
  */
-let pending = false;
+let attemptedThisInstance = false;
 
-export function markPendingDeployTopUp(): void {
-  pending = true;
-}
-
-/** trueが返るのは呼び出し後の1回だけ（同一インスタンス内で以後は常にfalse） */
-export function consumePendingDeployTopUp(): boolean {
-  if (!pending) return false;
-  pending = false;
+export function shouldAttemptDeployTopUp(): boolean {
+  if (attemptedThisInstance) return false;
+  attemptedThisInstance = true;
   return true;
 }

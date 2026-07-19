@@ -284,7 +284,7 @@ export async function topUpAllSubjects(profile: string): Promise<{ results: Reco
 }
 
 /**
- * 新しいデプロイのコールドスタート直後（`web/instrumentation.ts`）に、全科目のストック補充を
+ * 新しいデプロイ後の最初のリクエスト（`web/middleware.ts`）で、全科目のストック補充を
  * 1回だけ走らせるための「claim」。`app_settings.last_topup_deployment_id`と比較し、
  * 今回のdeploymentIdとまだ一致していなければ、それを新しい値に書き換えた上でtrueを返す
  * （= このインスタンスが実行担当）。Vercelの同時コールドスタートで複数インスタンスが

@@ -1,17 +1,22 @@
 import { NextResponse, NextRequest, after } from "next/server";
-import { consumePendingDeployTopUp } from "@/lib/deployTopUp";
+import { shouldAttemptDeployTopUp } from "@/lib/deployTopUp";
 
 // Supabase/LLM呼び出しを含む通常のNode.js実行環境で動かす（Edgeのデフォルトを避ける）。
 export const runtime = "nodejs";
 
 /**
- * デプロイ直後の最初の本物のリクエストで、全科目のストック補充を1回だけ非ブロッキングで
- * 走らせる（instrumentation.tsが起動時に立てたフラグを消費する）。ここは通常のリクエスト
- * 処理コンテキストなので、instrumentation.tsのregister()と違いfetchが確実に使える。
+ * デプロイ直後、このインスタンスが処理する最初のリクエストで、全科目のストック補充を
+ * 1回だけ非ブロッキングで走らせる。以前はinstrumentation.tsのregister()が立てた
+ * フラグをここで消費する2段構成だったが、register()とmiddleware.tsが同じモジュール
+ * 状態を共有しているとは限らないことが判明した（app_settings.last_topup_deployment_id
+ * が10回のデプロイに渡って一度も更新されていなかった）ため、middleware.ts単体で
+ * 完結する方式にした。shouldAttemptDeployTopUp()はこのインスタンス内で1回だけtrueを
+ * 返す軽量な間引きに過ぎず、正しさ自体はclaimDeploymentTopUp()の原子的なDB更新が
+ * 担保している（複数インスタンスから重複して呼ばれても実害は無い）。
  * after()で実行するため、このリクエスト自体の応答には一切影響しない。
  */
 export function middleware(req: NextRequest) {
-  if (consumePendingDeployTopUp()) {
+  if (shouldAttemptDeployTopUp()) {
     const deploymentId = process.env.VERCEL_DEPLOYMENT_ID;
     if (deploymentId) {
       after(async () => {
