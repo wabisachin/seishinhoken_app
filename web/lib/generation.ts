@@ -23,6 +23,33 @@ function cachedPrefix(text: string) {
   };
 }
 
+// LLMが稀にアラビア文字等、文字化けのような異言語文字を紛れ込ませることがあるため、
+// 日本語・英語・数字・一般的な記号以外の文字が混入していないかをホワイトリスト方式で
+// チェックする（許可する文字だけを列挙し、それ以外は問答無用で却下する）。
+// ギリシャ文字(α遮断薬・β受容体等)は医学用語で正規に使われるため許可に含める
+const ALLOWED_CHAR_RE = new RegExp(
+  "[" +
+    "\x09\x0A\x0D\x20-\x7E" + // タブ・改行・ASCII印字可能文字（英数字・半角記号）
+    "\u00A0-\u00FF" + // Latin-1補助（アクセント文字・°±×÷µ等）
+    "\u0370-\u03FF" + // ギリシャ文字
+    "\u2013\u2014\u2018-\u201D\u2026" + // ダッシュ・引用符・三点リーダ
+    "\u3000-\u303F" + // CJK記号と句読点
+    "\u3040-\u309F" + // ひらがな
+    "\u30A0-\u30FF" + // カタカナ
+    "\u3400-\u4DBF" + // CJK統合漢字拡張A
+    "\u4E00-\u9FFF" + // CJK統合漢字
+    "\uFF00-\uFFEF" + // 半角・全角形
+    "]",
+)
+
+function findForeignChars(text: string): string[] {
+  const found = new Set<string>();
+  for (const ch of text) {
+    if (!ALLOWED_CHAR_RE.test(ch)) found.add(ch);
+  }
+  return [...found];
+}
+
 // 構造化出力スキーマ（プロバイダ非対応の制約は避け、後段で手動検証する）
 // フィールド順序が生成順序に対応するため、必ず「各選択肢の正誤を吟味(explanations)」→
 // 「その結論から正答を確定(correct)」の順にする。逆順だと正答を先に決め打ちしてから
@@ -576,6 +603,14 @@ ${pastExcerpts.length ? pastExcerpts.map((e, i) => `${i + 1}. ${e}...`).join("\n
     if ((q.question_type === "single") !== (q.correct.length === 1)) formatProblems.push("question_typeと正答数が不一致");
     if (q.correct.length > 0 && q.correct.length <= 2 && q.correct.length !== answerCount) {
       formatProblems.push(`指定した正答数(${answerCount}つ)に従っていない`);
+    }
+    const foreignChars = [
+      ...new Set(
+        [q.stem, q.case_text ?? "", q.key_points, ...q.options, ...q.explanations].flatMap((t) => findForeignChars(t)),
+      ),
+    ];
+    if (foreignChars.length > 0) {
+      formatProblems.push(`日本語・英語・数字・一般的な記号以外の文字が混入している: ${foreignChars.join(" ")}`);
     }
     if (formatProblems.length > 0) {
       lastProblems = formatProblems;

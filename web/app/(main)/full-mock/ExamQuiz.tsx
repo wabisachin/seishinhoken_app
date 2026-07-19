@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { Question } from "@/lib/types";
 import { describeFailedGroups, type ExamPart } from "@/lib/examFormat";
+import { scrollToTop } from "../quiz/scrollToTop";
 
 const PART_LABEL: Record<ExamPart, string> = { common: "午前の部（共通科目）", specialized: "午後の部（専門科目）" };
 
@@ -107,6 +108,7 @@ export default function ExamQuiz() {
       setExpandedSubject(null);
       setViewingHistoryLabel(`第${roundNumber}回（${new Date(entry.completedAt).toLocaleDateString("ja-JP")}受験）`);
       setPhase("final-result");
+      scrollToTop();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setPhase("error");
@@ -178,6 +180,7 @@ export default function ExamQuiz() {
       return;
     }
     setPhase("answering");
+    scrollToTop();
   }
 
   // 残り時間のカウントダウン。0になったら自動的に提出する
@@ -254,6 +257,7 @@ export default function ExamQuiz() {
       const nextPage = page + 1;
       setPage(nextPage);
       setDraft({});
+      scrollToTop();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -286,6 +290,7 @@ export default function ExamQuiz() {
       } else {
         setPhase("part-result");
       }
+      scrollToTop();
       void loadState();
       void loadHistory();
     } catch (e) {
