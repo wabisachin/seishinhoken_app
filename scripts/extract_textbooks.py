@@ -35,7 +35,11 @@ def clean_text(text: str) -> str:
 
 
 def main() -> None:
-    pdfs = sorted(SRC.glob("*.pdf"))
+    # 「見て覚える！国試ナビ」はイラスト中心の図解教材で、ページ本文をそのままテキスト
+    # チャンクとして問題生成の根拠に使うと精度が下がる。専用パイプライン
+    # (extract_nav_pages.py / index_nav_pages.py、nav_pagesテーブル)で別途扱うため、
+    # ここでは除外して chunks/documents に混入しないようにする
+    pdfs = sorted(p for p in SRC.glob("*.pdf") if "国試ナビ" not in p.stem)
     if not pdfs:
         print(f"no PDFs found in {SRC}")
         return

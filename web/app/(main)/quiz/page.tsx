@@ -814,7 +814,13 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
             {record.isCorrect ? "正解！" : `不正解（正答: ${q.correct.join("、")}）`}
           </div>
 
-          <ExplanationList explanations={q.explanations} correct={q.correct} citations={q.citations} keyPoints={q.key_points} />
+          <ExplanationList
+            questionId={q.id}
+            explanations={q.explanations}
+            correct={q.correct}
+            citations={q.citations}
+            keyPoints={q.key_points}
+          />
 
           <div
             className="fixed inset-x-0 bottom-0 z-10 border-t border-stone-200 bg-white/95 p-4 backdrop-blur sm:static sm:border-0 sm:bg-transparent sm:p-0"

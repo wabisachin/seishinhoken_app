@@ -42,11 +42,19 @@ export function NavLinks() {
           <Link href="/stats" className="transition-colors hover:text-white">
             成績
           </Link>
+          {/* 本人モードはスマホの表示幅の都合でバナー最大5個に抑えている。
+              教科書検索を追加する代わりに合格ガイドはバナーから外し、使い方ページ内の
+              リンクに移設した（応援する人はもともと2バナーのみで余裕があるため残す） */}
+          <Link href="/search" className="transition-colors hover:text-white">
+            教科書検索
+          </Link>
         </>
       )}
-      <Link href="/pass-guide" className="transition-colors hover:text-white">
-        合格ガイド
-      </Link>
+      {isGuardian && (
+        <Link href="/pass-guide" className="transition-colors hover:text-white">
+          合格ガイド
+        </Link>
+      )}
       <Link href="/guide" className="transition-colors hover:text-white">
         使い方
       </Link>

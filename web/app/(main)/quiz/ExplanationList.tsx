@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Citation } from "@/lib/types";
 import { dedupeCitations } from "@/lib/citations";
+import NavPageViewer from "../search/NavPageViewer";
 
 /**
  * 選択肢ごとの解説＋その選択肢の正誤判定に使った教科書の根拠を対応付けて表示する。
@@ -10,13 +11,18 @@ import { dedupeCitations } from "@/lib/citations";
  * supportsが無い/空の引用は「その他の根拠」としてまとめて末尾に出す（旧データ・LLMが
  * 対応付けを省略したケースへのフォールバック）。
  */
+type NavPageRef = { id: number; book: string; page_number: number; title: string | null };
+
 export default function ExplanationList({
+  questionId,
   explanations,
   correct,
   citations,
   keyPoints,
   variant = "card",
 }: {
+  // 解説画面で関連する国試ナビのページを探すために使う。未指定の場合はセクション自体を出さない
+  questionId?: number;
   explanations: string[];
   correct: number[];
   citations: Citation[] | null;
@@ -29,6 +35,29 @@ export default function ExplanationList({
   // 一度に開けるのは1つだけ（アコーディオン）。複数開けると根拠がどれも半端に見えて
   // 読みにくいため、新しく開いたら前のものは自動的に閉じる
   const [expanded, setExpanded] = useState<number | null>(null);
+
+  // 関連する国試ナビのページ。questions行にlazy-cacheされているのでAPI呼び出しは
+  // 問題ごとに実質1回だけ（2回目以降はキャッシュ済みの結果がすぐ返る）
+  const [navPage, setNavPage] = useState<NavPageRef | null>(null);
+  const [navPageViewerOpen, setNavPageViewerOpen] = useState(false);
+  useEffect(() => {
+    if (!questionId) return;
+    let cancelled = false;
+    setNavPage(null);
+    fetch("/api/nav/related", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ questionId }),
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled && !d.error) setNavPage(d.navPage ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [questionId]);
 
   const toggle = (chunkId: number) => {
     setExpanded((prev) => (prev === chunkId ? null : chunkId));
@@ -150,6 +179,27 @@ export default function ExplanationList({
             })}
           </ul>
         </div>
+      )}
+
+      {navPage && (
+        <div className={isCard ? "rounded-2xl bg-white p-5 shadow-warm" : "mt-3"}>
+          <h3 className={isCard ? "mb-2 font-bold text-stone-700" : "mb-1 text-sm font-bold text-stone-700"}>
+            関連する国試ナビのページ
+          </h3>
+          <button
+            onClick={() => setNavPageViewerOpen(true)}
+            className="flex min-h-10 w-full items-center gap-2 rounded-xl border border-stone-100 p-2 text-left text-sm text-stone-600 hover:bg-stone-50"
+          >
+            <span className="text-indigo-300">🖼</span>
+            <span className="flex-1">
+              {navPage.title || navPage.book} ({navPage.book} p.{navPage.page_number})
+            </span>
+            <span className="shrink-0 text-xs font-bold text-indigo-500">開く</span>
+          </button>
+        </div>
+      )}
+      {navPageViewerOpen && navPage && (
+        <NavPageViewer navPageId={navPage.id} onClose={() => setNavPageViewerOpen(false)} />
       )}
     </>
   );

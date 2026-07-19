@@ -1,7 +1,35 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { getStoredProfile, type UserProfile } from "@/lib/profile";
+
 export default function GuidePage() {
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  useEffect(() => {
+    setProfile(getStoredProfile());
+  }, []);
+
   return (
     <div className="space-y-6">
       <h1 className="text-xl font-bold">このアプリの使い方</h1>
+
+      {/* 本人モードはナビバー枠(5個まで)の都合で合格ガイドをバナーから外しているため、
+          ここにリンクを置く。応援する人はバナーに合格ガイドが残っているので出さない */}
+      {profile === "self" && (
+        <section className="rounded-2xl bg-white p-5 shadow-warm">
+          <h2 className="font-bold text-indigo-700">合格ガイド</h2>
+          <p className="mt-2 text-sm leading-relaxed text-stone-700">
+            合格基準・科目群ごとの得点のしくみなど、試験制度についての説明はこちらです。
+          </p>
+          <Link
+            href="/pass-guide"
+            className="mt-3 inline-flex min-h-11 items-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-indigo-700"
+          >
+            合格ガイドを見る
+          </Link>
+        </section>
+      )}
 
       <section className="rounded-2xl bg-white p-5 shadow-warm">
         <h2 className="font-bold text-indigo-700">これは何？</h2>
@@ -86,6 +114,15 @@ export default function GuidePage() {
           解説の下に「教科書の根拠」として、実際にその教科書から抜き出した文章が表示されます。
           古い教科書PDFの都合で、まれに文字が読みにくくなっている箇所がありますが、
           問題や解説自体の正しさには影響しません。
+        </p>
+      </section>
+
+      <section className="rounded-2xl bg-white p-5 shadow-warm">
+        <h2 className="font-bold text-indigo-700">教科書検索について</h2>
+        <p className="mt-2 text-sm leading-relaxed text-stone-700">
+          「見て覚える！国試ナビ」はイラスト中心で図解がわかりやすい教材です。調べたい言葉を
+          入力すると、意味の近いページを画像で見つけて表示します。解説画面でも、関連する
+          国試ナビのページがあれば「関連する国試ナビのページ」として自動的に案内されます。
         </p>
       </section>
     </div>

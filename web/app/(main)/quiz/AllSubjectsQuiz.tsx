@@ -426,6 +426,7 @@ export default function AllSubjectsQuiz() {
                   })}
                 </ol>
                 <ExplanationList
+                  questionId={q.id}
                   explanations={q.explanations}
                   correct={q.correct}
                   citations={q.citations}
