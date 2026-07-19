@@ -206,8 +206,8 @@ function WeaknessRow({ s, medianTotal }: { s: ReviewSubject; medianTotal: number
       <button
         type="button"
         onClick={() => setShowDetail((v) => !v)}
-        aria-label={thin ? "解答数が少ない科目の詳細を見る" : "詳細を見る"}
-        title={thin ? "解答数がまだ少なく、まだ遭遇していない問題にも弱点が隠れている可能性があります" : undefined}
+        aria-label={thin ? "問題数が少ない科目の詳細を見る" : "詳細を見る"}
+        title={thin ? "問題数がまだ少なく、まだ遭遇していない問題にも弱点が隠れている可能性があります" : undefined}
         className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full font-serif text-sm italic transition-colors ${
           thin ? "bg-amber-400 font-bold text-white hover:bg-amber-500" : "border border-stone-300 text-stone-400 hover:bg-stone-100"
         }`}
@@ -222,7 +222,7 @@ function WeaknessRow({ s, medianTotal }: { s: ReviewSubject; medianTotal: number
       {row}
       {showDetail && (
         <div className="mt-1 space-y-0.5 rounded-lg bg-stone-50 p-2 text-xs leading-relaxed text-stone-600">
-          <p>解答数: {s.total}問</p>
+          <p>問題数: {s.total}問</p>
           {s.everMissed > 0 && (
             <p>
               克服: {cleared}/{s.everMissed}問
@@ -235,7 +235,7 @@ function WeaknessRow({ s, medianTotal }: { s: ReviewSubject; medianTotal: number
           )}
           {thin && (
             <p className="text-amber-700">
-              解答数がまだ少なく（目安{CONFIDENCE_THRESHOLD}問、または他科目の解答数の中央値の半分）、まだ遭遇していない未知の問題が多く残っています。そこにまだ弱点が隠れている可能性があります。優先して演習することをおすすめします。
+              問題数がまだ少なく（目安{CONFIDENCE_THRESHOLD}問、または他科目の問題数の中央値の半分）、まだ遭遇していない未知の問題が多く残っています。そこにまだ弱点が隠れている可能性があります。優先して演習することをおすすめします。
             </p>
           )}
         </div>
@@ -263,7 +263,7 @@ function WeaknessMapSection({ title, subjects, medianTotal }: { title: string; s
     <div>
       <h3 className="mb-1.5 flex items-baseline gap-2 text-xs font-bold text-stone-500">
         {title}
-        <span className="font-normal text-stone-400">計{totalAnswered}問解答</span>
+        <span className="font-normal text-stone-400">問題数計{totalAnswered}問</span>
       </h3>
       <div className="space-y-1.5">
         {untouched.map((s) => (
@@ -286,12 +286,13 @@ function WeaknessMapSection({ title, subjects, medianTotal }: { title: string; s
   );
 }
 
-type PendingResume = { href: string; label: string } | null;
+type PendingResume = { href: string; label: string; kind: "mock" | "subject"; subject: string | null } | null;
 
 // 全科目演習・科目別演習はどちらも独自にlocalStorageへ進行中セッションを保存していて
 // （それぞれのページ内で「続きから再開しますか？」を出す）、ホーム画面はそれとは別に
-// 「前回途中だったものがある」こと自体をバナーで気づかせる役割を持つ。判定ロジックは
-// 各ページの「unfinished」判定と揃える（キーやフィールド名が変わったら両方直すこと）
+// 「前回途中だったものがある」こと自体をバナーで気づかせる役割と、おすすめの次の一手
+// （/api/home/next-action）にこの状況を伝える役割を持つ。判定ロジックは各ページの
+// 「unfinished」判定と揃える（キーやフィールド名が変わったら両方直すこと）
 function checkPendingResume(): PendingResume {
   if (typeof window === "undefined") return null;
   try {
@@ -301,7 +302,12 @@ function checkPendingResume(): PendingResume {
       const answered = Object.keys(p.answers ?? {}).length;
       const total = (p.subjectOrder ?? []).length;
       if (total > 0 && answered < total) {
-        return { href: "/quiz?mode=mock", label: `全科目演習（${answered}/${total}問まで解答済み）` };
+        return {
+          href: "/quiz?mode=mock",
+          label: `全科目演習（${answered}/${total}問まで解答済み）`,
+          kind: "mock",
+          subject: null,
+        };
       }
     }
   } catch {
@@ -314,7 +320,12 @@ function checkPendingResume(): PendingResume {
       const answered = (p.records ?? []).length;
       const count = p.count ?? 0;
       if (count > 0 && answered < count && p.subject) {
-        return { href: "/quiz?mode=subject", label: `科目別演習「${p.subject}」（${answered}/${count}問まで解答済み）` };
+        return {
+          href: "/quiz?mode=subject",
+          label: `科目別演習「${p.subject}」（${answered}/${count}問まで解答済み）`,
+          kind: "subject",
+          subject: p.subject,
+        };
       }
     }
   } catch {
@@ -324,7 +335,6 @@ function checkPendingResume(): PendingResume {
 }
 
 export default function Dashboard() {
-  const [pendingResume, setPendingResume] = useState<PendingResume>(null);
   const [reviewSubjects, setReviewSubjects] = useState<ReviewSubject[] | null>(null);
   const [everMissed, setEverMissed] = useState(0);
   const [totalWrong, setTotalWrong] = useState(0);
@@ -335,14 +345,18 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setPendingResume(checkPendingResume());
-  }, []);
-
-  useEffect(() => {
     const cached = loadCachedNextAction();
+    // 前回途中で終えた演習があれば、その情報を「おすすめの次の一手」にも伝える
+    // （computeNextActionがこれを最優先で提案するため、バナーとの言動が揃う）
+    const pending = checkPendingResume();
+    const pendingQuery = pending
+      ? `?pendingKind=${pending.kind}&pendingLabel=${encodeURIComponent(pending.label)}${
+          pending.subject ? `&pendingSubject=${encodeURIComponent(pending.subject)}` : ""
+        }`
+      : "";
     // まず状態のフィンガープリントだけを安く取得し、前回キャッシュ時と一致するなら
     // LLM呼び出し（/api/home/next-action）自体をスキップしてキャッシュをそのまま使う
-    fetch("/api/home/next-action/state")
+    fetch(`/api/home/next-action/state${pendingQuery}`)
       .then((r) => r.json())
       .then((d) => {
         if (d.error) throw new Error(d.error);
@@ -350,7 +364,7 @@ export default function Dashboard() {
           setNextAction(cached);
           return;
         }
-        return fetch("/api/home/next-action")
+        return fetch(`/api/home/next-action${pendingQuery}`)
           .then((r) => r.json())
           .then((fresh) => {
             if (!fresh.error) {
@@ -402,19 +416,9 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {pendingResume && (
-        <section className="rounded-2xl border-2 border-amber-400 bg-amber-50 p-4 shadow-warm">
-          <p className="text-sm font-bold text-amber-800">前回途中だった演習があります</p>
-          <p className="mt-0.5 text-sm text-amber-700">{pendingResume.label}</p>
-          <Link
-            href={pendingResume.href}
-            className="mt-3 inline-flex min-h-11 items-center rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-amber-600"
-          >
-            続きから始めますか？
-          </Link>
-        </section>
-      )}
-
+      {/* 前回途中で終えた演習がある場合、専用バナーは出さず「おすすめの次の一手」に
+          一本化する（computeNextActionがpendingResumeを最優先で必ず提案するため、
+          別のバナーを並べると同じ内容が二重に表示されてしまう） */}
       {!nextActionLoading && nextAction && (
         <section className="rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-600 p-5 text-white shadow-warm">
           <p className="text-xs font-medium text-indigo-100">おすすめの次の一手</p>
@@ -490,11 +494,11 @@ export default function Dashboard() {
         <section className="rounded-2xl bg-white p-5 shadow-warm">
           <h2 className="mb-1 flex items-baseline gap-2 font-bold text-indigo-700">
             科目別弱点マップ
-            <span className="text-xs font-normal text-stone-400">全体で計{totalAnsweredOverall}問解答</span>
+            <span className="text-xs font-normal text-stone-400">全体の問題数計{totalAnsweredOverall}問</span>
           </h2>
           <p className="mb-3 text-xs text-stone-400">
-            未挑戦・解答数が少ない科目（ⓘが黄色）は科目別演習、解答数が十分で間違えた
-            問題が残っている科目は復習モードが始まります。ⓘで解答数・克服数を確認できます。
+            未挑戦・問題数が少ない科目（ⓘが黄色）は科目別演習、問題数が十分で間違えた
+            問題が残っている科目は復習モードが始まります。ⓘで問題数・克服数を確認できます。
           </p>
           <div className="space-y-5">
             <WeaknessMapSection title="共通科目" subjects={commonSubjects} medianTotal={medianTotal} />

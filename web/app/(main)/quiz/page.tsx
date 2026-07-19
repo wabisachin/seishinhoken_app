@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import type { Mode, Question } from "@/lib/types";
 import { getStoredProfile } from "@/lib/profile";
@@ -110,6 +110,7 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
   // phaseにしておく（resume-promptはpendingResumeが無いと何も描画しないため、
   // 初期値に使うとハイドレーション完了までの一瞬〜稀に長時間、画面が真っ暗に見える）。
   const [phase, setPhase] = useState<Phase>(mode === "subject" ? "loading" : "setup");
+  const router = useRouter();
   const [subjects, setSubjects] = useState<{ subject: string; taxonomy_items: number; kind: string | null }[]>([]);
   // ホーム画面のおすすめアクションから科目を指定して遷移してきた場合、科目別演習の
   // 選択画面でその科目をあらかじめ選んだ状態にする（自動開始はしない。出題数など
@@ -215,10 +216,13 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
     );
   }
 
+  // 「新しく始める」ではなく、途中状態を消してダッシュボードに戻るだけにする。
+  // ここで新しい演習の設定画面に進んでしまうと、演習自体をやめたいユーザーにも
+  // 何かを新しく始めることを強いてしまうため
   function discardSession() {
     clearSubjectSession();
     setPendingResume(null);
-    setPhase("setup");
+    router.push("/");
   }
 
   /**
@@ -454,7 +458,7 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
               onClick={discardSession}
               className="min-h-12 rounded-xl border border-stone-300 px-4 py-3 text-sm text-stone-600 transition-colors hover:bg-stone-100"
             >
-              新しく始める
+              やめてダッシュボードに戻る
             </button>
           </div>
         </div>

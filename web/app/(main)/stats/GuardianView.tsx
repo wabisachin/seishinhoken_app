@@ -176,7 +176,7 @@ export default function GuardianView() {
         <div className="mb-4 grid grid-cols-3 gap-3 text-center">
           <div>
             <p className="text-2xl font-bold text-stone-800">{totalAnswered}問</p>
-            <p className="text-xs text-stone-500">総解答数</p>
+            <p className="text-xs text-stone-500">総問題数</p>
           </div>
           <div>
             <p className="text-2xl font-bold text-red-600">{totalWrong}問</p>
@@ -193,7 +193,7 @@ export default function GuardianView() {
             return (
               <div key={s.subject} className="flex items-center gap-2 rounded-xl bg-stone-50 p-2">
                 <span className="w-28 shrink-0 truncate text-xs text-stone-700 sm:w-36">{s.subject}</span>
-                <span className="flex-1 text-right text-[11px] text-stone-500">解答{s.total}問</span>
+                <span className="flex-1 text-right text-[11px] text-stone-500">{s.total}問</span>
                 {s.wrongCount > 0 ? (
                   <span className="shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-700">
                     未克服{s.wrongCount}問

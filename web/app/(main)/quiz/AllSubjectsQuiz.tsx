@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { Question } from "@/lib/types";
 import { getStoredProfile } from "@/lib/profile";
 import ExplanationList from "./ExplanationList";
@@ -86,6 +87,7 @@ type Phase = "checking" | "resume-prompt" | "loading" | "generating" | "answerin
  * （「未知の問題への対応力」の計測は実戦模試の役割。詳細はweb/app/api/stats/route.ts参照）。
  */
 export default function AllSubjectsQuiz() {
+  const router = useRouter();
   const [phase, setPhase] = useState<Phase>("checking");
   const [subjectOrder, setSubjectOrder] = useState<string[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -203,9 +205,13 @@ export default function AllSubjectsQuiz() {
     void runBackgroundRunner(pendingResume.subjectOrder, pendingResume.questions.length);
   }
 
-  function discardAndStart() {
+  // 「新しく始める」ではなく、途中状態を消してダッシュボードに戻るだけにする。
+  // ここで新しい演習を自動的に始めてしまうと、演習自体をやめたいユーザーにも
+  // 何かを新しく始めることを強いてしまうため
+  function discardAndDashboard() {
+    clearPersisted();
     setPendingResume(null);
-    void startFresh();
+    router.push("/");
   }
 
   function toggle(q: Question, n: number) {
@@ -309,10 +315,10 @@ export default function AllSubjectsQuiz() {
               続きから再開する
             </button>
             <button
-              onClick={discardAndStart}
+              onClick={discardAndDashboard}
               className="min-h-12 rounded-xl border border-stone-300 px-4 py-3 text-sm text-stone-600 transition-colors hover:bg-stone-100"
             >
-              新しく始める
+              やめてダッシュボードに戻る
             </button>
           </div>
         </div>

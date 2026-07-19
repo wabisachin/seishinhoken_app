@@ -18,6 +18,11 @@ export type NextAction = {
   href: string;
 };
 
+// ホーム画面（web/app/(main)/page.tsx）がlocalStorageから検出した「前回途中で終えた
+// 演習」の情報。サーバー側のこのファイルからはlocalStorageを直接読めないため、
+// クライアントからクエリパラメータ経由で渡してもらう
+export type PendingResumeInfo = { kind: "mock" | "subject"; subject: string | null; label: string };
+
 // 科目別演習/全科目演習の裏側のストック目標(questionSupply.tsのSTOCK_TARGET=5)を下回れば
 // 「薄い」とみなす目安。ちょうど同じ値だと補充中の一瞬でも毎回反応してしまうため、少し余裕を持たせる。
 const STOCK_LOW_THRESHOLD = 3;
@@ -51,7 +56,7 @@ function href(action: NextAction["action"], targetSubject: string | null): strin
  * 組み立てられ、LLM呼び出しは含まない（stateHashだけを安く取得できるようにするため、
  * computeNextActionと分離してある）。
  */
-async function gatherState() {
+async function gatherState(pendingResume: PendingResumeInfo | null) {
   const sb = supabase();
   const [
     stockSnapshot,
@@ -224,6 +229,10 @@ async function gatherState() {
   fingerprintParts.push(
     `latestExam:${latestRow?.id ?? "none"}:${latestRow?.common_completed_at ?? ""}:${latestRow?.specialized_completed_at ?? ""}`,
   );
+  // 前回途中で終えた演習の有無・種類もフィンガープリントに含める。DB側の状態が
+  // 何も変わっていなくても、ユーザーが演習を再開して離脱した/最後まで終えたなど
+  // localStorageの状態だけが変化した場合に、キャッシュされた古い提案を使い回さないため
+  fingerprintParts.push(`pending:${pendingResume ? `${pendingResume.kind}:${pendingResume.subject ?? ""}` : "none"}`);
   const stateHash = createHash("sha256").update(fingerprintParts.join("|")).digest("hex").slice(0, 20);
 
   return {
@@ -244,13 +253,14 @@ async function gatherState() {
     roundsThisMonth,
     startedToday,
     daysLeftInMonth,
+    pendingResume,
     stateHash,
   };
 }
 
 /** LLMを呼ばずに状態のフィンガープリントだけを安く取得する。ホーム画面がこれで前回と比較し、変化が無ければLLM呼び出し自体を省略する。 */
-export async function getNextActionStateHash(): Promise<string> {
-  const state = await gatherState();
+export async function getNextActionStateHash(pendingResume: PendingResumeInfo | null = null): Promise<string> {
+  const state = await gatherState(pendingResume);
   return state.stateHash;
 }
 
@@ -263,8 +273,10 @@ export async function getNextActionStateHash(): Promise<string> {
  * 月次上限到達）はそもそも候補に含めないため、LLMがそれを選ぶことは無いが、
  * 万一のフォーマット逸脱・API失敗に備えてコード側でも検証し、決定的なフォールバックを用意する。
  */
-export async function computeNextAction(): Promise<NextAction & { stateHash: string }> {
-  const state = await gatherState();
+export async function computeNextAction(
+  pendingResume: PendingResumeInfo | null = null,
+): Promise<NextAction & { stateHash: string }> {
+  const state = await gatherState(pendingResume);
   const {
     stockSnapshot,
     wrongProgress,
@@ -286,6 +298,24 @@ export async function computeNextAction(): Promise<NextAction & { stateHash: str
     stateHash,
   } = state;
 
+  // 前回途中で終えた演習（ホーム画面のバナーで案内済み）がある場合、次の一手も
+  // 必ずそれを最優先で促す。演習を投げ出して別の科目に誘導するとバナーとの言動が
+  // 矛盾するため、LLMの判断結果に関わらずこれを最終的な答えとして優先する
+  function pendingResumeAction(): NextAction | null {
+    if (!pendingResume) return null;
+    return {
+      action: pendingResume.kind,
+      targetSubject: pendingResume.kind === "subject" ? pendingResume.subject : null,
+      reason: `前回途中の${pendingResume.label}を終わらせましょう`,
+      href: href(pendingResume.kind, pendingResume.kind === "subject" ? pendingResume.subject : null),
+    };
+  }
+
+  // 前回途中で終えた演習がある場合は、LLMを呼ぶまでもなく必ずそれを最優先で促す
+  // （演習を投げ出して別の科目に誘導すると、ホーム画面のバナーと言動が矛盾するため）
+  const pendingAction = pendingResumeAction();
+  if (pendingAction) return { ...pendingAction, stateHash };
+
   function fallback(): NextAction {
     if (untouchedSubjects.length + lowConfidenceSubjects.length >= UNTOUCHED_THRESHOLD) {
       if (untouchedSubjects.length > 0) {
@@ -294,7 +324,7 @@ export async function computeNextAction(): Promise<NextAction & { stateHash: str
       return {
         action: "mock",
         targetSubject: null,
-        reason: `解答数が少なく判断できない科目が${lowConfidenceSubjects.length}件あります`,
+        reason: `問題数が少なく判断できない科目が${lowConfidenceSubjects.length}件あります`,
         href: href("mock", null),
       };
     }
@@ -330,7 +360,7 @@ export async function computeNextAction(): Promise<NextAction & { stateHash: str
       return {
         action: "subject",
         targetSubject: subject,
-        reason: `${subject}は他科目より解答数が少なめです`,
+        reason: `${subject}は他科目より問題数が少なめです`,
         href: href("subject", subject),
       };
     }
@@ -361,15 +391,15 @@ ${feasibleActionsText}
 
 # 現在の状況
 - 全${stockSnapshot.length}科目中、まだ一度も演習していない科目: ${untouchedSubjects.length}科目${untouchedSubjects.length > 0 ? `（${untouchedSubjects.slice(0, 6).join("、")}）` : ""}
-- 解答数が少なく（${CONFIDENCE_THRESHOLD}問未満）苦手かどうかまだ判断できない科目: ${lowConfidenceSubjects.length}科目${lowConfidenceSubjects.length > 0 ? `（${lowConfidenceSubjects.slice(0, 6).join("、")}）` : ""}
+- 問題数が少なく（${CONFIDENCE_THRESHOLD}問未満）苦手かどうかまだ判断できない科目: ${lowConfidenceSubjects.length}科目${lowConfidenceSubjects.length > 0 ? `（${lowConfidenceSubjects.slice(0, 6).join("、")}）` : ""}
 - 科目別の新規ストック（未出題の問題数）: 平均${avgUnserved.toFixed(1)}問/科目。特に少ない科目: ${thinSubjects.length > 0 ? thinSubjects.join("、") : "無し"}
 - 今も間違えたまま残っている問題: 全体で${wrongProgress.currentWrong}問（これまで間違えた${wrongProgress.everMissed}問中）
-- 苦手科目トップ3（演習中、間違えたまま残っている問題が多い順）: ${weakSubjects.length > 0 ? weakSubjects.slice(0, 3).map((s) => `${s.subject}(残り${s.currentWrong}問${s.thin ? "・解答数少" : ""})`).join("、") : "無し"}
-- 苦手科目トップ3の対応方法: 解答数が「少」と付いている科目は、間違いが残っていても
+- 苦手科目トップ3（演習中、間違えたまま残っている問題が多い順）: ${weakSubjects.length > 0 ? weakSubjects.slice(0, 3).map((s) => `${s.subject}(残り${s.currentWrong}問${s.thin ? "・問題数少" : ""})`).join("、") : "無し"}
+- 苦手科目トップ3の対応方法: 問題数が「少」と付いている科目は、間違いが残っていても
   actionはreviewではなくsubjectにしてください（母数を増やしてまだ見つかっていない
   弱点を洗い出すことを優先すべきため）。「少」が付いていない科目はactionをreviewに
-  してください（解答数は十分なので、残っている間違いをそのまま復習で潰すべきため）
-- 解答数が少なく判断できない科目は、間違いの有無に関わらず未挑戦の科目と同列に最優先で
+  してください（問題数は十分なので、残っている間違いをそのまま復習で潰すべきため）
+- 問題数が少なく判断できない科目は、間違いの有無に関わらず未挑戦の科目と同列に最優先で
   扱ってください。まだ解いていない問題の中に見つかっていない弱点が隠れている可能性が
   高く、母数を増やすこと自体が優先課題です。苦手科目トップ3への対応は、判断できない
   科目が無くなった後にしてください
@@ -378,7 +408,7 @@ ${feasibleActionsText}
 - 実戦模試での正答率の低さは、演習で「間違えたまま残っている問題」が無くなっていても
   「未知の問題への対応力が低い」ことを示す強いシグナルです。苦手科目トップ3が無い、または
   対応済みでも、実戦模試での弱点科目が残っていれば優先的に科目別演習を勧めてください
-- 判定材料は十分(${CONFIDENCE_THRESHOLD}問以上)だが、他の科目に比べて解答数が相対的に
+- 判定材料は十分(${CONFIDENCE_THRESHOLD}問以上)だが、他の科目に比べて問題数が相対的に
   少ない科目: ${underPracticedSubjects.length > 0 ? underPracticedSubjects.slice(0, 5).join("、") : "無し"}
   （未挑戦・データ不足・苦手科目・実戦模試での弱点のいずれも無い場合、この中から1科目を
   選んでバランスよく演習量を底上げする提案をしてください）
