@@ -100,6 +100,7 @@ export async function computeMonthlyPlan(profile: string): Promise<MonthlyPlan> 
 }
 
 export type PlanProgress = {
+  reportId: number;
   planTotal: number;
   doneTotal: number;
   bySubject: { subject: string; target: number; done: number }[];
@@ -116,7 +117,7 @@ export async function getPlanProgress(profile: string): Promise<PlanProgress | n
   const sb = supabase();
   const { data: latest, error } = await sb
     .from("monthly_reports")
-    .select("plan")
+    .select("id, plan")
     .eq("profile", profile)
     .order("period_month", { ascending: false })
     .limit(1)
@@ -154,5 +155,5 @@ export async function getPlanProgress(profile: string): Promise<PlanProgress | n
       return { subject: s.subject, target, done };
     });
 
-  return { planTotal, doneTotal, bySubject };
+  return { reportId: latest.id as number, planTotal, doneTotal, bySubject };
 }

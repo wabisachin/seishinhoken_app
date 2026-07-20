@@ -33,7 +33,12 @@ const ACTION_LABEL: Record<NextAction["action"], string> = {
   garden: "記憶の庭",
 };
 
-type PlanProgress = { planTotal: number; doneTotal: number; bySubject: { subject: string; target: number; done: number }[] };
+type PlanProgress = {
+  reportId: number;
+  planTotal: number;
+  doneTotal: number;
+  bySubject: { subject: string; target: number; done: number }[];
+};
 
 // 「おすすめの次の一手」はLLM呼び出しを伴うため、ホーム画面を開くたび（単なるリロードも
 // 含む）に毎回呼ぶとトークンを浪費する。かといって時間で区切ると、短時間に何問も解いて
@@ -492,7 +497,10 @@ export default function Dashboard() {
         <section className="rounded-2xl bg-white p-5 shadow-warm">
           <div className="flex items-center justify-between">
             <h2 className="font-bold text-indigo-700">今月の学習プラン</h2>
-            <Link href="/stats" className="text-xs text-stone-400 underline underline-offset-2">
+            <Link
+              href={`/reports/${planProgress.reportId}?profile=${getStoredProfile()}`}
+              className="text-xs text-stone-400 underline underline-offset-2"
+            >
               振り返りレポートを見る
             </Link>
           </div>

@@ -6,6 +6,15 @@ import Link from "next/link";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { getStoredProfile } from "@/lib/profile";
 
+type ExamMonthSummary = {
+  roundsCount: number;
+  averageRate: number;
+  passCount: number;
+  failCount: number;
+  zeroScoreGroupOccurrences: number;
+  topStrongSubjects: { subject: string; rate: number }[];
+  topWeakSubjects: { subject: string; rate: number }[];
+} | null;
 type MonthMetrics = {
   periodMonth: string;
   answeredThisMonth: number;
@@ -13,6 +22,7 @@ type MonthMetrics = {
   weaknessesOvercome: number;
   bySubjectWrong: { subject: string; wrongCount: number }[];
   byMinorWrong: { subject: string; minor: string; wrongCount: number }[];
+  examSummary: ExamMonthSummary;
 };
 type FormatWeakness = {
   caseWrong: number;
@@ -127,6 +137,59 @@ function ReportDetailInner() {
           </div>
         </div>
       </section>
+
+      {metrics.examSummary && (
+        <section className="rounded-2xl bg-white p-5 shadow-warm">
+          <h2 className="mb-3 font-bold text-indigo-700">今月の実戦模試</h2>
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div>
+              <p className="text-2xl font-bold text-stone-800">{metrics.examSummary.roundsCount}回</p>
+              <p className="text-xs text-stone-500">受験回数</p>
+            </div>
+            <div>
+              <p className={`text-2xl font-bold ${metrics.examSummary.averageRate >= 60 ? "text-green-600" : "text-red-600"}`}>
+                {metrics.examSummary.averageRate}%
+              </p>
+              <p className="text-xs text-stone-500">平均得点率</p>
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-stone-800">
+                <span className="text-green-600">{metrics.examSummary.passCount}</span>
+                {" / "}
+                <span className="text-red-600">{metrics.examSummary.failCount}</span>
+              </p>
+              <p className="text-xs text-stone-500">合格 / 不合格</p>
+            </div>
+          </div>
+          {metrics.examSummary.zeroScoreGroupOccurrences > 0 && (
+            <p className="mt-3 text-xs text-red-600">0点の科目群が延べ{metrics.examSummary.zeroScoreGroupOccurrences}回発生しました</p>
+          )}
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <div>
+              <p className="mb-1.5 text-xs font-bold text-stone-500">得意科目 TOP3</p>
+              <ul className="space-y-1 text-sm text-stone-700">
+                {metrics.examSummary.topStrongSubjects.map((s, i) => (
+                  <li key={i} className="flex justify-between gap-2">
+                    <span className="truncate">{s.subject}</span>
+                    <span className="shrink-0 font-medium text-green-600">{s.rate}%</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <p className="mb-1.5 text-xs font-bold text-stone-500">苦手科目 TOP3</p>
+              <ul className="space-y-1 text-sm text-stone-700">
+                {metrics.examSummary.topWeakSubjects.map((s, i) => (
+                  <li key={i} className="flex justify-between gap-2">
+                    <span className="truncate">{s.subject}</span>
+                    <span className="shrink-0 font-medium text-red-600">{s.rate}%</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </section>
+      )}
 
       {narrative.highlights.length > 0 && (
         <section className="rounded-2xl border-l-4 border-amber-400 bg-amber-50 p-5 shadow-warm">

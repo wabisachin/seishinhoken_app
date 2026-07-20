@@ -6,6 +6,7 @@ import { getLlmSettings } from "./appSettings";
 import { logUsage } from "./usageLog";
 import { computeMonthlyPlan, type MonthlyPlan } from "./monthlyPlan";
 import { daysUntilExam } from "./examFormat";
+import { computePartResult, computeVerdict, type ExamAttemptRow } from "./examMode";
 
 // 誤答パターン分析(ステージ1)の対象件数。対象月固定ではなく直近N件にしている理由:
 // (a) 動作テスト用は移行済みの古いデータのため、月固定だと分析対象が空になってしまう、
@@ -92,6 +93,16 @@ async function fetchFullHistory(profile: string): Promise<Map<number, QuestionHi
   return result;
 }
 
+export type ExamMonthSummary = {
+  roundsCount: number;
+  averageRate: number; // 0-100（その月に完了した回の得点率の平均）
+  passCount: number;
+  failCount: number;
+  zeroScoreGroupOccurrences: number; // その月の完了回を通じて「科目群が0点」だった延べ回数
+  topStrongSubjects: { subject: string; rate: number }[];
+  topWeakSubjects: { subject: string; rate: number }[];
+} | null;
+
 export type MonthMetrics = {
   periodMonth: string; // "YYYY-MM"
   answeredThisMonth: number;
@@ -99,7 +110,75 @@ export type MonthMetrics = {
   weaknessesOvercome: number;
   bySubjectWrong: { subject: string; wrongCount: number }[];
   byMinorWrong: { subject: string; minor: string; wrongCount: number }[];
+  examSummary: ExamMonthSummary;
 };
+
+/**
+ * 対象月(periodMonth="YYYY-MM")に完了した実戦模試（両パート完了）の結果を集計する。
+ * lib/examMode.tsのcomputePartResult/computeVerdict（api/exam/history/routeと同じ判定）を
+ * 再利用し、合否・科目群0点判定のロジックを重複させない。完了回が1件も無ければnull。
+ */
+async function fetchExamMonthSummary(profile: string, periodMonth: string): Promise<ExamMonthSummary> {
+  const sb = supabase();
+  const { data: rows, error } = await sb
+    .from("exam_attempts")
+    .select("*")
+    .eq("profile", profile)
+    .eq("common_status", "completed")
+    .eq("specialized_status", "completed");
+  if (error) throw new Error(error.message);
+
+  const roundsInMonth = ((rows ?? []) as ExamAttemptRow[]).filter((row) => {
+    const commonAt = row.common_completed_at ? new Date(row.common_completed_at).getTime() : 0;
+    const specializedAt = row.specialized_completed_at ? new Date(row.specialized_completed_at).getTime() : 0;
+    const completedAt = new Date(Math.max(commonAt, specializedAt)).toISOString();
+    return monthKey(completedAt) === periodMonth;
+  });
+  if (roundsInMonth.length === 0) return null;
+
+  const results = await Promise.all(
+    roundsInMonth.map(async (row) => {
+      const [commonResult, specializedResult] = await Promise.all([
+        computePartResult(row.id, row.common_question_ids ?? []),
+        computePartResult(row.id, row.specialized_question_ids ?? []),
+      ]);
+      const bySubject = [...commonResult.bySubject, ...specializedResult.bySubject];
+      return { bySubject, verdict: computeVerdict(bySubject) };
+    }),
+  );
+
+  let passCount = 0;
+  let failCount = 0;
+  let zeroScoreGroupOccurrences = 0;
+  let rateSum = 0;
+  const subjectAgg = new Map<string, { correct: number; total: number }>();
+  for (const { bySubject, verdict } of results) {
+    if (verdict.passed) passCount++;
+    else failCount++;
+    zeroScoreGroupOccurrences += verdict.failedGroups.length;
+    rateSum += verdict.overallRate;
+    for (const s of bySubject) {
+      const entry = subjectAgg.get(s.subject) ?? { correct: 0, total: 0 };
+      entry.correct += s.correct;
+      entry.total += s.total;
+      subjectAgg.set(s.subject, entry);
+    }
+  }
+
+  const bySubjectRate = [...subjectAgg.entries()]
+    .map(([subject, { correct, total }]) => ({ subject, rate: total > 0 ? Math.round((100 * correct) / total) : 0 }))
+    .sort((a, b) => b.rate - a.rate);
+
+  return {
+    roundsCount: roundsInMonth.length,
+    averageRate: Math.round((100 * rateSum) / results.length),
+    passCount,
+    failCount,
+    zeroScoreGroupOccurrences,
+    topStrongSubjects: bySubjectRate.slice(0, 3),
+    topWeakSubjects: [...bySubjectRate].reverse().slice(0, 3),
+  };
+}
 
 /**
  * 対象月(periodMonth="YYYY-MM")の決定的な集計。LLMは使わない。
@@ -108,7 +187,7 @@ export type MonthMetrics = {
  * - weaknessesOvercome: 「3連続正解に初めて到達した瞬間」が今月だった回数
  *   （克服後に再び間違えて、その後また3連続正解に到達すれば再克服として再度カウントする）
  */
-function computeMonthMetrics(histories: Map<number, QuestionHistory>, periodMonth: string): MonthMetrics {
+function computeMonthMetrics(histories: Map<number, QuestionHistory>, periodMonth: string): Omit<MonthMetrics, "examSummary"> {
   let answeredThisMonth = 0;
   let newWeaknessesDiscovered = 0;
   let weaknessesOvercome = 0;
@@ -388,6 +467,15 @@ function buildNarrativePrompt(args: {
 - 事例問題の誤答率: ${formatWeakness.caseTotal > 0 ? Math.round((100 * formatWeakness.caseWrong) / formatWeakness.caseTotal) : 0}%（${formatWeakness.caseTotal}問中）/ 知識問題の誤答率: ${formatWeakness.nocaseTotal > 0 ? Math.round((100 * formatWeakness.nocaseWrong) / formatWeakness.nocaseTotal) : 0}%（${formatWeakness.nocaseTotal}問中）
 - 五肢択二の誤答率: ${formatWeakness.multiTotal > 0 ? Math.round((100 * formatWeakness.multiWrong) / formatWeakness.multiTotal) : 0}%（${formatWeakness.multiTotal}問中）/ 五肢択一の誤答率: ${formatWeakness.singleTotal > 0 ? Math.round((100 * formatWeakness.singleWrong) / formatWeakness.singleTotal) : 0}%（${formatWeakness.singleTotal}問中）
 
+# 今月受けた実戦模試の結果
+${
+  metrics.examSummary
+    ? `${metrics.examSummary.roundsCount}回受験・平均得点率${metrics.examSummary.averageRate}%・合格${metrics.examSummary.passCount}回/不合格${metrics.examSummary.failCount}回${metrics.examSummary.zeroScoreGroupOccurrences > 0 ? `・0点の科目群が延べ${metrics.examSummary.zeroScoreGroupOccurrences}回発生` : ""}
+得意科目トップ3: ${metrics.examSummary.topStrongSubjects.map((s) => `${s.subject}(${s.rate}%)`).join("、") || "無し"}
+苦手科目トップ3: ${metrics.examSummary.topWeakSubjects.map((s) => `${s.subject}(${s.rate}%)`).join("、") || "無し"}`
+    : "今月は実戦模試を受けていません"
+}
+
 # 誤答パターン分析（別のLLMが実施した結果）
 ${JSON.stringify(mistakeAnalysis)}
 
@@ -427,7 +515,8 @@ export async function generateMonthlyReport(profile: string, periodMonth: string
   const llm = await getLlmSettings();
   const model = getModel(llm);
 
-  const metrics = computeMonthMetrics(histories, periodMonth);
+  const examSummary = await fetchExamMonthSummary(profile, periodMonth);
+  const metrics: MonthMetrics = { ...computeMonthMetrics(histories, periodMonth), examSummary };
   const formatWeakness = computeFormatWeakness(histories);
   const recentWrong = extractRecentWrongQuestions(histories, MISTAKE_ANALYSIS_WINDOW);
 

@@ -5,8 +5,6 @@ import { listSubjects } from "./subjects";
 import type { Question } from "./types";
 import { EXAM_SUBJECT_COUNTS, EXAM_STOCK_SESSIONS_AHEAD, ExamPart } from "./examFormat";
 
-// 累積アクティブ数がこれ未満の間は、ストック補充のたびに必ず新規生成する
-const FULL_GENERATION_UNTIL = 50;
 // これに達したら新規生成を止め、以降はプールからの再出題のみにする
 export const SUBJECT_TARGET = 200;
 // 却下(rejected)も安全弁の分母に数える。却下ばかりの科目でも必ずここで新規生成が止まる。
@@ -147,12 +145,11 @@ async function countUnservedActive(subject: string, profile: string, caseAxis?: 
 const topUpInFlight = new Set<string>();
 
 /**
- * 指定科目の「未出題ストック」がSTOCK_TARGET未満なら生成して埋める。ただし
- * 「50問に達するまでは必ず新規、200問に向けて徐々に新規率を下げる」という
- * コスト上限のポリシー自体は変わらない。生成のタイミングが同期（即時）から
- * 非同期（このストック補充）に移っただけで、成熟した科目（50〜200問）では
- * 確率で「今回は生成しない」が選ばれることがあり、その場合はストックが
- * 5に届いていなくても無理に埋めようとせず、そのまま打ち切る
+ * 指定科目の「未出題ストック」がSTOCK_TARGET未満なら生成して埋める。新規生成の確率は
+ * (SUBJECT_TARGET - activeCount) / SUBJECT_TARGET で、0問なら100%、100問で50%、
+ * 150問で25%、200問(SUBJECT_TARGET)で0%と、アクティブ数に応じて線形に下がっていく
+ * （新規率を下げる分、既出問題の再出題で埋め合わせる）。確率で「今回は生成しない」が
+ * 選ばれた場合、ストックが5に届いていなくても無理に埋めようとせず、そのまま打ち切る
  * （却下含め生成に失敗し続ける場合も同様に打ち切る。TOPUP_BATCH_CAPが上限）。
  *
  * 1日1回のCron（`/api/cron/topup`）と、出題直後のバックグラウンドフック
@@ -187,8 +184,7 @@ export async function topUpSubject(
       const activeCount = await countBySubject(subject, ["active"], "general", profile);
       if (totalCount >= HARD_CAP_TOTAL || activeCount >= SUBJECT_TARGET) break;
 
-      const newProbability =
-        activeCount < FULL_GENERATION_UNTIL ? 1 : (SUBJECT_TARGET - activeCount) / (SUBJECT_TARGET - FULL_GENERATION_UNTIL);
+      const newProbability = Math.max(0, (SUBJECT_TARGET - activeCount) / SUBJECT_TARGET);
       if (Math.random() >= newProbability) break;
 
       try {
