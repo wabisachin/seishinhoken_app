@@ -54,10 +54,10 @@ export default function GuidePage() {
           <div>
             <p className="font-medium text-stone-900">② 全科目演習</p>
             <p className="mt-1">
-              全18科目から1問ずつ、まんべんなく出題されます。3問（3科目）を1セットとして解き、
-              セットを解き終えるたびにその場で解答と解説が表示されます。全部で18問、進捗バーで
-              残りがひと目でわかります。得点率などの結果レポートはありません
-              （未知の問題への対応力を測るのは実戦模試の役割です）。
+              共通科目（12科目）・専門科目（6科目）のどちらかを選び、その科目群を1問ずつ横断で
+              出題します。科目別演習と同じく1問ずつ答えるとすぐ解答・解説が表示され、次の問題へ
+              進みます。最後まで解き終えると正答数・正答率が表示されます（詳しい対応力の計測は
+              実戦模試の役割です）。
             </p>
           </div>
           <div>
@@ -68,6 +68,59 @@ export default function GuidePage() {
               「間違えたまま残っている問題数」を0にすることです。
             </p>
           </div>
+        </div>
+      </section>
+
+      <section className="rounded-2xl bg-white p-5 shadow-warm">
+        <h2 className="font-bold text-indigo-700">学習サイクルの全体像</h2>
+        <p className="mt-2 text-sm leading-relaxed text-stone-700">
+          解いた問題は、正解・誤答に応じて自動的に次のプールへ移っていきます。全体の流れは次の通りです。
+        </p>
+        <div className="mt-4 space-y-2">
+          <CycleStage
+            emoji="📝"
+            title="科目別演習・全科目演習"
+            subtitle="新しい問題、またはすでに解いたことのある問題を抽選で出題"
+            color="indigo"
+          >
+            <CycleBranch tone="good" to="そのまま（また出題対象に残ります）" />
+            <CycleBranch tone="bad" to="復習プールへ" />
+          </CycleStage>
+          <CycleArrow />
+          <CycleStage
+            emoji="🔁"
+            title="復習プール"
+            subtitle="「間違えたまま残っている問題」。間違えた回数が多いものほど優先的に出題"
+            color="amber"
+          >
+            <CycleBranch tone="good" to="想起の庭プールへ（2週間は出題対象から外れます）" />
+            <CycleBranch tone="bad" to="復習プールに残り続けます" />
+          </CycleStage>
+          <CycleArrow />
+          <CycleStage
+            emoji="🌱"
+            title="想起の庭プール"
+            subtitle="「克服してから2週間以上たった問題」。対象になったのが古い問題から出題"
+            color="emerald"
+          >
+            <CycleBranch tone="good" to="再び2週間の待機へ（このサイクルを繰り返します）" />
+            <CycleBranch tone="bad" to="復習プールに戻ります" />
+          </CycleStage>
+        </div>
+        <div className="mt-4 rounded-xl bg-stone-50 p-4 text-sm leading-relaxed text-stone-700">
+          <p className="font-medium text-stone-900">📦 科目ごとの問題ストックには上限があります</p>
+          <p className="mt-1.5">
+            科目ごとにAIが新しく問題を作り続け、最大200問まで貯まります。200問に達すると新規作成は止まり、
+            以降はこの200問の中からの出題だけになります。新しい問題に出会える割合は、貯まった問題数が
+            増えるほど少しずつ下がっていきます（0問のときはほぼ100%、100問で約50%、200問以降は最低ラインの
+            25%で下げ止まります）。
+          </p>
+          <p className="mt-1.5">
+            演習モード（科目別演習・全科目演習）で出題される「すでに解いたことのある問題」には、復習プールや
+            想起の庭プールの問題も含まれます。1回正解しただけの問題を完全に出題対象から外すことはしません。
+            間違えた問題を効率よく記憶に定着させつつ、「たまたま1回正解しただけ」かもしれない問題にも触れ続け、
+            試験範囲全体をまんべんなくカバーできるようにするバランスです。
+          </p>
         </div>
       </section>
 
@@ -128,7 +181,7 @@ export default function GuidePage() {
       </section>
 
       <section className="rounded-2xl bg-white p-5 shadow-warm">
-        <h2 className="font-bold text-emerald-700">🌱 記憶の庭について</h2>
+        <h2 className="font-bold text-emerald-700">🌱 想起の庭について</h2>
         <p className="mt-2 text-sm leading-relaxed text-stone-700">
           間違えた問題は、同じ問題で正解すると「克服」したとみなされ、復習の対象から
           外れます。しかし人の記憶は時間とともに薄れていくもの（忘却曲線）で、一度克服した
@@ -138,10 +191,10 @@ export default function GuidePage() {
           <ForgettingCurve />
         </div>
         <p className="mt-2 text-sm leading-relaxed text-stone-700">
-          記憶の庭は、この考え方に基づき、<strong className="font-bold">克服してから2週間以上経った問題</strong>
+          想起の庭は、この考え方に基づき、<strong className="font-bold">克服してから2週間以上経った問題</strong>
           を全分野横断で再テストする場所です（復習モードの選択画面から入れます）。克服が
           古い（＝対象になってから長く経っている）問題から順に出題されます。対象問題が
-          30問に満たない間はまだ選べません。記憶の庭でもし間違えたら、その問題は通常の
+          30問に満たない間はまだ選べません。想起の庭でもし間違えたら、その問題は通常の
           復習ストックに戻り、また正解を目指すことになります。
         </p>
       </section>
@@ -156,6 +209,116 @@ export default function GuidePage() {
           新しいレポートができると、ホーム画面にお知らせが表示されます。
         </p>
       </section>
+
+      <section className="rounded-2xl bg-white p-5 shadow-warm">
+        <h2 className="font-bold text-indigo-700">🤖 「おすすめの次の一手」の決め方</h2>
+        <p className="mt-2 text-sm leading-relaxed text-stone-700">
+          ホーム画面のおすすめは、以下の考え方を優先順位の高い順にAIが確認しながら、
+          今のあなたの状況に一番合う行動を1つだけ選んで提案しています。
+        </p>
+        <div className="mt-3 rounded-xl border-l-4 border-stone-300 bg-stone-50 p-3 text-sm text-stone-700">
+          <span className="font-bold">最優先:</span> 前回途中で終えた演習があれば、他の何より先にその続きを提案します
+        </div>
+        <div className="mt-3">
+          <RankStep n={1} condition="まだ一度も演習していない・判断材料が少ない科目が全体的に多い" action="全科目演習（共通科目・専門科目のうち手薄な方）" note="判断材料を広く集めることを優先" />
+          <RankStep n={2} condition="前回の実戦模試で0点だった科目群がある" action="その中で一番弱い科目を科目別演習" note="合格基準に直結するため最優先で対応" />
+          <RankStep n={3} condition="実戦模試（未知の問題）での正答率が低い科目がある" action="その科目を科目別演習" note="演習だけでは見えない「対応力不足」への対処" />
+          <RankStep n={4} condition="科目の未出題ストックが薄い科目がある" action="全科目演習でストックを底上げ" />
+          <RankStep n={5} condition="間違えたまま残っている問題が多い苦手科目トップ3がある" action="科目別演習、または復習モード" note="判断材料が十分なら復習モード、不足していれば科目別演習を優先。ただし復習が20問以上溜まっていれば判断材料が少なくても復習モードを優先" />
+          <RankStep n={6} condition="他の科目に比べて演習量が相対的に少なめの科目がある" action="全科目演習で底上げ" />
+          <RankStep n={7} condition="実戦模試を受けられる状況（月内のペース配分も考慮）" action="実戦模試で力試し" />
+          <RankStep n={8} condition="上記のいずれにも当てはまらない" action="全科目演習を継続" isLast />
+        </div>
+        <div className="mt-3 space-y-1.5 rounded-xl bg-emerald-50 p-3 text-xs leading-relaxed text-emerald-800">
+          <p>
+            🌱 想起の庭（対象30問以上で選べるようになります）は合否に直結する優先度が高くないため、
+            他に優先すべき弱点が無く、しばらく実施していない場合の選択肢として提案されることがあります。
+          </p>
+        </div>
+        <p className="mt-3 text-xs leading-relaxed text-stone-400">
+          実際の判断はAIが行い、上記の考え方を基本の軸にしつつ、学習プランの遅れ具合などその場の状況も
+          踏まえて柔軟に判断します。毎回まったく同じ提案ばかりにならないよう、時には気分転換として
+          別の選択肢を提案することもあります。
+        </p>
+      </section>
+    </div>
+  );
+}
+
+function CycleStage({
+  emoji,
+  title,
+  subtitle,
+  color,
+  children,
+}: {
+  emoji: string;
+  title: string;
+  subtitle: string;
+  color: "indigo" | "amber" | "emerald";
+  children: React.ReactNode;
+}) {
+  const colorClass = {
+    indigo: "border-indigo-400 bg-indigo-50/60",
+    amber: "border-amber-400 bg-amber-50/60",
+    emerald: "border-emerald-400 bg-emerald-50/60",
+  }[color];
+  return (
+    <div className={`rounded-2xl border-l-4 p-4 ${colorClass}`}>
+      <p className="font-bold text-stone-900">
+        {emoji} {title}
+      </p>
+      <p className="mt-0.5 text-xs text-stone-500">{subtitle}</p>
+      <div className="mt-2 space-y-1.5">{children}</div>
+    </div>
+  );
+}
+
+function CycleBranch({ tone, to }: { tone: "good" | "bad"; to: string }) {
+  return (
+    <p
+      className={`flex flex-wrap items-center gap-1.5 rounded-lg px-2 py-1 text-sm ${
+        tone === "good" ? "bg-emerald-100/70 text-emerald-800" : "bg-red-100/70 text-red-800"
+      }`}
+    >
+      <span className="font-bold">{tone === "good" ? "○ 正解" : "× 誤答"}</span>
+      <span aria-hidden>→</span>
+      <span className="text-stone-700">{to}</span>
+    </p>
+  );
+}
+
+function CycleArrow() {
+  return (
+    <div className="flex justify-center text-2xl leading-none text-stone-300" aria-hidden>
+      ↓
+    </div>
+  );
+}
+
+function RankStep({
+  n,
+  condition,
+  action,
+  note,
+  isLast,
+}: {
+  n: number;
+  condition: string;
+  action: string;
+  note?: string;
+  isLast?: boolean;
+}) {
+  return (
+    <div className="flex gap-3">
+      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold text-white">
+        {n}
+      </div>
+      <div className={`flex-1 pb-3 ${isLast ? "" : "border-b border-stone-100"}`}>
+        <p className="text-sm text-stone-700">{condition}</p>
+        <p className="mt-1 text-xs font-medium text-indigo-600">→ {action}</p>
+        {note && <p className="mt-0.5 text-xs text-stone-400">{note}</p>}
+      </div>
     </div>
   );
 }

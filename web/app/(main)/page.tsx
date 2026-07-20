@@ -36,7 +36,7 @@ const ACTION_LABEL: Record<NextAction["action"], string> = {
   review: "復習モード",
   mock: "全科目演習",
   exam: "実戦模試",
-  garden: "記憶の庭",
+  garden: "想起の庭",
 };
 
 type PlanProgress = {
@@ -163,15 +163,15 @@ function WeaknessRow({ s, medianTotal }: { s: ReviewSubject; medianTotal: number
 
   const badge =
     category === "needsReview" ? (
-      <span className="shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-700">残り{s.wrongCount}問</span>
+      <span className="whitespace-nowrap rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-700">残り{s.wrongCount}問</span>
     ) : category === "untouched" ? (
-      <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">未挑戦</span>
+      <span className="whitespace-nowrap rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">未挑戦</span>
     ) : isPerfect ? (
-      <span className="shrink-0 rounded-full bg-gradient-to-r from-amber-300 via-yellow-200 to-amber-400 px-2 py-0.5 text-xs font-extrabold text-amber-900 shadow-sm">
+      <span className="whitespace-nowrap rounded-full bg-gradient-to-r from-amber-300 via-yellow-200 to-amber-400 px-2 py-0.5 text-xs font-extrabold text-amber-900 shadow-sm">
         ✨ PERFECT
       </span>
     ) : (
-      <span className="shrink-0 rounded-full bg-green-100 px-2 py-0.5 text-xs font-bold text-green-700">OK</span>
+      <span className="whitespace-nowrap rounded-full bg-green-100 px-2 py-0.5 text-xs font-bold text-green-700">OK</span>
     );
 
   // 解答数が少ない科目(thin)は、間違えたまま残っている問題があっても復習ではなく
@@ -197,7 +197,12 @@ function WeaknessRow({ s, medianTotal }: { s: ReviewSubject; medianTotal: number
       <div className="h-2 w-10 shrink-0 overflow-hidden rounded-full bg-stone-100 sm:w-16">
         <div className={`h-full rounded-full ${barColor}`} style={{ width: `${barPercent}%` }} />
       </div>
-      {badge}
+      {/* バッジ本文の文字数は「残り199問」「未挑戦」「✨ PERFECT」「OK」で大きく異なる。
+          badgeをそのまま(shrink-0の可変幅)並べると、その幅の差分だけ手前のflex-1（科目名）に
+          割り当てられる幅が変わってしまい、結果として進捗バーの開始位置が行ごとにズレて見える
+          （ユーザー報告の実際の原因）。バッジを固定幅の箱に収め、幅そのものを一定にすることで、
+          科目名の幅ひいては進捗バーの開始位置を全行で揃える */}
+      <div className="flex w-28 shrink-0 justify-end">{badge}</div>
     </>
   );
 
@@ -600,6 +605,9 @@ export default function Dashboard() {
                 これまで間違えた{everMissed}問のうち{everMissed - totalWrong}問を克服済み（{consumedPercent}%消化）
               </p>
               <p className="mt-1 text-xs text-stone-400">※同一の問題に正解すると克服したとみなします</p>
+              <p className="mt-1 text-xs text-emerald-600">
+                🌱 克服後2週間経つと「想起の庭」の対象になり、忘れた頃にもう一度出題されます（そこでも間違えると復習に戻ります）
+              </p>
             </div>
           </div>
         )}

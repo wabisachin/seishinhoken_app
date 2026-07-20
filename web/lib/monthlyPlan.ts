@@ -18,8 +18,9 @@ const MAX_SETS_PER_CELL = 6;
 const THIN_THRESHOLD = 30;
 // 復習ストックがこの問数を超えている科目は「積み上がりすぎ」とみなす（ユーザー指示:
 // 復習が溜まりすぎるとやる気を削ぐため、超過分を優先的に消化する配分にする）。
-// lib/nextAction.ts の REVIEW_BACKLOG_SATURATION と同じ考え方を独立に持つ。
-const REVIEW_BACKLOG_SATURATION = 20;
+// lib/nextAction.ts の REVIEW_BACKLOG_SATURATION と同じ考え方を独立に持つ
+// （克服条件が1回正解になり3倍消化しやすくなったため、しきい値も3倍(60)にしてある）。
+const REVIEW_BACKLOG_SATURATION = 60;
 
 export type SubjectPlanEntry = {
   subject: string;

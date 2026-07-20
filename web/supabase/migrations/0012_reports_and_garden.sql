@@ -18,7 +18,7 @@ create table monthly_reports (
 create index monthly_reports_profile_idx on monthly_reports (profile, period_month desc);
 alter table monthly_reports enable row level security;
 
--- 記憶の庭（克服済み問題の再出題。ユーザー向け表示名は「記憶の庭」、内部modeはgarden）用の
+-- 想起の庭（克服済み問題の再出題。ユーザー向け表示名は「想起の庭」、内部modeはgarden）用の
 -- 解答モードを追加する。
 alter table attempts drop constraint attempts_mode_check;
 alter table attempts add constraint attempts_mode_check

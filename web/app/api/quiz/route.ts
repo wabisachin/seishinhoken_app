@@ -49,7 +49,7 @@ const QUESTION_COLS =
  * 出題セットを返す。
  * mode=subject: 指定科目からランダム
  * mode=review:  最後の解答が誤答だった問題を優先
- * mode=garden:  記憶の庭。克服済みだが忘れかけている問題を再出題する
+ * mode=garden:  想起の庭。克服済みだが忘れかけている問題を再出題する
  *
  * mode=mockはここには無い。全科目演習も科目別演習と同じ生成ロジック
  * （questionSupply.tsのgetOrGenerateNext）を使うため、AllSubjectsQuiz.tsxから
@@ -105,9 +105,9 @@ export async function GET(req: NextRequest) {
     }
 
     if (mode === "garden") {
-      // 記憶の庭: 克服済み(直近の解答が正解)だが、克服してから一定期間(14日)以上
+      // 想起の庭: 克服済み(直近の解答が正解)だが、克服してから一定期間(14日)以上
       // 経過した問題を再出題する。新規生成は一切トリガーしない（既存問題のみ）。
-      // 「記憶の庭の対象に入ったのが古い問題から」出す方針のため、重み付き抽選ではなく
+      // 「想起の庭の対象に入ったのが古い問題から」出す方針のため、重み付き抽選ではなく
       // 克服からの経過日数が長い(＝対象になってから長く待たされている)順に決定的に選ぶ。
       const eligible = await computeGardenEligible(profile);
       const targetIds = [...eligible.entries()]

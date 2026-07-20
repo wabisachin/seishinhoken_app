@@ -36,11 +36,11 @@ const MAX_NEXT_ATTEMPTS = 15;
 const DEFAULT_SESSION_COUNT = 5;
 const MAX_SESSION_COUNT = 10;
 
-// 復習モード・記憶の庭は新規生成を一切行わない（既存問題の読み出しのみ）ため、
+// 復習モード・想起の庭は新規生成を一切行わない（既存問題の読み出しのみ）ため、
 // 科目別演習のコスト上限用カウント(count状態)とは無関係に、独自の出題数を使う。
 const REVIEW_COUNT = 10;
 
-// 記憶の庭（克服済みだが2週間以上前に克服し忘れかけている問題の再出題）が選べるようになる
+// 想起の庭（克服済みだが2週間以上前に克服し忘れかけている問題の再出題）が選べるようになる
 // 最低対象件数。lib/reviewStock.tsのGARDEN_MIN_ELIGIBLEと同じ値を独立に持つ
 // （サーバー専用のそちらをクライアントから直接importできないため）。
 const GARDEN_MIN_ELIGIBLE = 30;
@@ -509,7 +509,7 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
     return (
       <div className="space-y-4">
         <h1 className="text-xl font-bold">
-          {mode === "subject" ? "科目別演習" : mode === "garden" ? "記憶の庭" : "復習モード"}
+          {mode === "subject" ? "科目別演習" : mode === "garden" ? "想起の庭" : "復習モード"}
         </h1>
         {error && <p className="rounded bg-amber-100 p-3 text-sm text-amber-800">{error}</p>}
         {mode === "subject" && (
@@ -613,14 +613,14 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
         )}
         {mode === "review" && !error && (
           <>
-            {/* 記憶の庭への入り口。復習モードの下に置く。対象30問未満の間は、グレーアウト
+            {/* 想起の庭への入り口。復習モードの下に置く。対象30問未満の間は、グレーアウト
                 表示ではなく項目自体を出さない（早い段階から見えても選べず紛らわしいため）。 */}
             {!reviewSummaryLoading && gardenSummary && gardenSummary.eligibleCount >= GARDEN_MIN_ELIGIBLE && (
               <Link
                 href="/quiz?mode=garden"
                 className="mb-3 block rounded-2xl border-l-4 border-emerald-400 bg-white p-4 shadow-warm transition-all hover:-translate-y-0.5 hover:shadow-warm-lg"
               >
-                <p className="font-bold text-emerald-700">🌱 記憶の庭</p>
+                <p className="font-bold text-emerald-700">🌱 想起の庭</p>
                 <p className="mt-1 text-sm text-stone-600">
                   克服済みだが2週間以上前で忘れかけている問題を再テスト（対象{gardenSummary.eligibleCount}問）
                 </p>
@@ -695,7 +695,7 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
         {mode === "garden" && !error && (
           <div className="rounded-2xl border-l-4 border-emerald-400 bg-white p-5 shadow-warm">
             <p className="text-sm leading-relaxed text-stone-700">
-              記憶の庭は、一度は間違えて正解し克服したものの、克服から2週間以上が経ち
+              想起の庭は、一度は間違えて正解し克服したものの、克服から2週間以上が経ち
               忘れかけている可能性がある問題を再テストする場所です。忘却曲線を踏まえ、
               対象になった（克服した）のが古い問題から順に出題されます。
               <strong className="font-bold text-emerald-700">ここで間違えると、その問題は復習ストックに戻ります。</strong>
@@ -779,7 +779,7 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
               setError(null);
               if (mode === "review" || mode === "garden") {
                 // 科目選択をやり直せるよう、選択画面に戻す（成績が変わっている可能性もあるため
-                // 苦手科目・記憶の庭の対象件数も再取得する）
+                // 苦手科目・想起の庭の対象件数も再取得する）
                 setReviewSummaryLoading(true);
                 fetch(`/api/quiz/review-summary?profile=${getStoredProfile() ?? "self"}`)
                   .then((r) => r.json())

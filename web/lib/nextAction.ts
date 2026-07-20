@@ -52,7 +52,9 @@ const CONFIDENCE_THRESHOLD = 30;
 // 復習ストック（間違えたまま残っている問題）がこの問数以上溜まっている科目は、
 // たとえ全体の解答数が薄くても新規問題(subject)をこれ以上勧めない（ユーザー指示:
 // 復習が積み上がりすぎるとやる気を削ぐため、それ以上増やさず消化を優先させる）。
-const REVIEW_BACKLOG_SATURATION = 20;
+// 元は20だったが、克服条件が「3回連続正解」から「1回正解」に緩和され、同じ復習量でも
+// 3倍消化しやすくなったため、しきい値も3倍(60)に引き上げている。
+const REVIEW_BACKLOG_SATURATION = 60;
 
 const NextActionSchema = z.object({
   action: z.enum(["subject", "review", "mock", "exam", "garden"]),
@@ -237,7 +239,7 @@ async function gatherState(pendingResume: PendingResumeInfo | null, profile: str
     remainingThisMonth > 0 && !startedToday && (readyRounds.common >= 1 || readyRounds.specialized >= 1);
   const knownSubjects = new Set(stockSnapshot.map((s) => s.subject));
 
-  // 記憶の庭（克服済みだが忘れかけている問題の再出題）が今すぐ選べるかどうか。
+  // 想起の庭（克服済みだが忘れかけている問題の再出題）が今すぐ選べるかどうか。
   const gardenFeasible = gardenSummary.eligibleCount >= GARDEN_MIN_ELIGIBLE;
 
   // 本番までの残り日数。日次で値が変わるため、これはプロンプト文脈にのみ使い
@@ -273,7 +275,7 @@ async function gatherState(pendingResume: PendingResumeInfo | null, profile: str
   // 何も変わっていなくても、ユーザーが演習を再開して離脱した/最後まで終えたなど
   // localStorageの状態だけが変化した場合に、キャッシュされた古い提案を使い回さないため
   fingerprintParts.push(`pending:${pendingResume ? `${pendingResume.kind}:${pendingResume.subject ?? ""}:${pendingResume.part ?? ""}` : "none"}`);
-  // 新しい月次振り返りレポートが発行された・記憶の庭が開放/非開放に切り替わった、
+  // 新しい月次振り返りレポートが発行された・想起の庭が開放/非開放に切り替わった、
   // という変化もキャッシュ再計算のトリガーに含める（本番までの残り日数のような
   // 日次で必ず変わる値はここには含めない。上のexamDaysRemainingのコメント参照）。
   fingerprintParts.push(`report:${latestReport?.id ?? "none"}:${latestReport?.period_month ?? ""}`);
@@ -488,7 +490,7 @@ export async function computeNextAction(
     "- review: 復習モード（対象科目を1つ指定。過去に間違えて、まだ克服できていない問題だけを解き直す）",
     "- mock: 全科目演習（共通科目12科目または専門科目6科目のどちらかを1問ずつ横断。partに\"common\"か\"specialized\"を必ず指定すること。手薄な科目を広く埋める・ストックを増やす）",
     examFeasible ? "- exam: 実戦模試（本番同形式・未出題の問題だけで力試し）" : null,
-    gardenFeasible ? "- garden: 記憶の庭（克服済みだが2週間以上前に克服した、忘れかけている問題の再テスト）" : null,
+    gardenFeasible ? "- garden: 想起の庭（克服済みだが2週間以上前に克服した、忘れかけている問題の再テスト）" : null,
   ]
     .filter(Boolean)
     .join("\n");
@@ -544,7 +546,7 @@ mockを選ぶ場合、原則として平均解答数が少ない方のpartを指
 
 # 選べる行動（このリストにあるものだけから選ぶこと）
 ${feasibleActionsText}
-${gardenSummary.eligibleCount < GARDEN_MIN_ELIGIBLE ? `- 記憶の庭は対象問題が${gardenSummary.eligibleCount}/${GARDEN_MIN_ELIGIBLE}問のため今はまだ選べません（候補に入れないでください）` : ""}
+${gardenSummary.eligibleCount < GARDEN_MIN_ELIGIBLE ? `- 想起の庭は対象問題が${gardenSummary.eligibleCount}/${GARDEN_MIN_ELIGIBLE}問のため今はまだ選べません（候補に入れないでください）` : ""}
 
 # 今月の学習プラン（振り返りレポートが算出した、合格から逆算した今月の数値目標。現在の消化状況）
 ${planLines ? `${planLines}（進捗 ${planProgress?.doneTotal ?? 0}/${planProgress?.planTotal ?? 0}問）` : "まだ発行されていません"}
@@ -587,7 +589,7 @@ ${planLines ? `${planLines}（進捗 ${planProgress?.doneTotal ?? 0}/${planProgr
   ある程度進んだ節目ごとに計画的に受けるのが望ましいペースです。今月すでに何度も受験している、
   もしくは前回受験からまだ日が浅い場合は、残り回数があっても演習（科目別演習・全科目演習）を
   優先し、実戦模試は勧めないでください
-- 記憶の庭（克服済みだが2週間以上前に克服し忘れかけている問題の再テスト）: ${
+- 想起の庭（克服済みだが2週間以上前に克服し忘れかけている問題の再テスト）: ${
     gardenFeasible
       ? `対象${gardenSummary.eligibleCount}問、前回実施は${gardenSummary.lastPlayedAt ? new Date(gardenSummary.lastPlayedAt).toLocaleDateString("ja-JP") : "未実施"}。合否に直結する優先度は高くないので、他に優先すべき苦手が無く久しく実施していない場合の選択肢としてください`
       : `対象${gardenSummary.eligibleCount}/${GARDEN_MIN_ELIGIBLE}問でまだ選べません`

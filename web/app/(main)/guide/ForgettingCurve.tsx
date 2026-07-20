@@ -3,9 +3,9 @@
 import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 // 忘却曲線（エビングハウスの忘却曲線の考え方に基づく、実データではないイメージ図）。
-// 「復習しない場合」は指数関数的に記憶保持率が下がり続けるが、「記憶の庭で復習した場合」は
-// 克服から14日後（記憶の庭の対象になるタイミング）に思い出す機会があることで、その後の
-// 減衰が緩やかになる ── という記憶の庭の設計思想を視覚的に示す。
+// 「復習しない場合」は指数関数的に記憶保持率が下がり続けるが、「想起の庭で復習した場合」は
+// 克服から14日後（想起の庭の対象になるタイミング）に思い出す機会があることで、その後の
+// 減衰が緩やかになる ── という想起の庭の設計思想を視覚的に示す。
 const REVIEW_DAY = 14;
 
 function withoutReview(day: number): number {
@@ -26,7 +26,7 @@ const data = Array.from({ length: 61 }, (_, day) => ({
 
 const SERIES_LABEL: Record<string, string> = {
   withoutReview: "復習しない場合",
-  withReview: "記憶の庭で復習した場合",
+  withReview: "想起の庭で復習した場合",
 };
 
 export default function ForgettingCurve() {
@@ -46,7 +46,7 @@ export default function ForgettingCurve() {
             x={REVIEW_DAY}
             stroke="#059669"
             strokeDasharray="4 4"
-            label={{ value: "記憶の庭", position: "top", fill: "#059669", fontSize: 11 }}
+            label={{ value: "想起の庭", position: "top", fill: "#059669", fontSize: 11 }}
           />
           <Line type="monotone" dataKey="withoutReview" stroke="#f87171" strokeWidth={2} dot={false} />
           <Line type="monotone" dataKey="withReview" stroke="#059669" strokeWidth={2} dot={false} />

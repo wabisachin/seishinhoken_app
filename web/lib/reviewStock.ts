@@ -4,14 +4,14 @@ export type WrongStockEntry = { subject: string; missCount: number };
 
 // 直近の解答が正解なら弱点を克服したとみなす（1回でも間違えれば即座にストックへ戻る）。
 // 以前は3回連続正解を要求していたが、復習ストックが積み上がりすぎてテンポが悪くなる
-// ほうが問題であり、克服後に忘れていないかは記憶の庭（GARDEN_OVERCOME_MIN_DAYS）で
+// ほうが問題であり、克服後に忘れていないかは想起の庭（GARDEN_OVERCOME_MIN_DAYS）で
 // 別途確認できるため、1回正解で即座に克服扱いにする方針に変更した。
 const REQUIRED_STREAK = 1;
 
-// 記憶の庭（克服済みだが忘れかけている問題の再出題）関連の定数。
+// 想起の庭（克服済みだが忘れかけている問題の再出題）関連の定数。
 // 克服してからこの日数以上経過した問題だけが対象になる（忘却曲線を踏まえ、
 // ある程度時間が経ってから記憶の定着を確認する）。1回正解するとすぐ克服扱いになる分、
-// 記憶の庭側の再確認サイクルは短め(2週間)にして、忘れたまま長期間放置されないようにする。
+// 想起の庭側の再確認サイクルは短め(2週間)にして、忘れたまま長期間放置されないようにする。
 export const GARDEN_OVERCOME_MIN_DAYS = 14;
 // 対象問題がこの件数に満たない場合はUIでグレーアウトする（毎回同じ数問を
 // 繰り返し出題するだけになってしまうのを避けるための最低ライン）。
@@ -52,10 +52,10 @@ async function computeQuestionStats(profile: string): Promise<Map<number, Questi
       if (history[i].is_correct) trailingCorrect++;
       else break;
     }
-    // 克服の瞬間 = 直近の正解のanswered_at。記憶の庭で再テストして正解した場合も
+    // 克服の瞬間 = 直近の正解のanswered_at。想起の庭で再テストして正解した場合も
     // ここが更新されることで、そこから改めてGARDEN_OVERCOME_MIN_DAYS日のカウントダウンが
     // 始まる（更新されないと、一度対象になった問題が正解し続けても「経過日数」が
-    // 伸び続けてしまい、記憶の庭でずっと最優先で出続けてしまう）。
+    // 伸び続けてしまい、想起の庭でずっと最優先で出続けてしまう）。
     const overcomeAt = trailingCorrect >= REQUIRED_STREAK ? history[history.length - 1].answered_at : null;
     stats.set(questionId, { subject, missCount, trailingCorrect, overcomeAt });
   }
@@ -133,9 +133,9 @@ export async function getWrongStockProgressBySubject(
 export type GardenEntry = { subject: string; missCount: number; overcomeAt: string; daysSinceOvercome: number };
 
 /**
- * 記憶の庭（克服済みだが忘れかけている問題）の対象一覧。「今も克服済み
+ * 想起の庭（克服済みだが忘れかけている問題）の対象一覧。「今も克服済み
  * (trailingCorrect>=REQUIRED_STREAK)」かつ「克服してからGARDEN_OVERCOME_MIN_DAYS日以上
- * 経過」した問題を返す。記憶の庭で誤答すればtrailingCorrectがリセットされ弱点ストックに
+ * 経過」した問題を返す。想起の庭で誤答すればtrailingCorrectがリセットされ弱点ストックに
  * 戻る（＝この一覧からも自動的に外れる）ため、克服状態を保つための追加のカラムや
  * 状態管理は不要 ── computeQuestionStats の履歴走査だけで完結する。
  */
@@ -156,7 +156,7 @@ export async function computeGardenEligible(profile: string): Promise<Map<number
   return result;
 }
 
-/** 記憶の庭の選択画面用。対象件数と前回実施日（mode='garden'の最新answered_at）。 */
+/** 想起の庭の選択画面用。対象件数と前回実施日（mode='garden'の最新answered_at）。 */
 export async function getGardenSummary(profile: string): Promise<{ eligibleCount: number; lastPlayedAt: string | null }> {
   const [eligible, { data: lastRow }] = await Promise.all([
     computeGardenEligible(profile),
