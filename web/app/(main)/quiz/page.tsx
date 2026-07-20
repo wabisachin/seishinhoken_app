@@ -657,12 +657,14 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
                       // までの距離のほうが次にすべきことが分かりやすいため
                       const cleared = Math.max(0, s.everMissed - s.wrongCount);
                       const clearedRate = s.everMissed > 0 ? cleared / s.everMissed : 0;
+                      // カードの基調色は「残り問題数」バッジ（赤）とは別に、進捗が伝わる
+                      // 柔らかいグリーンの濃淡にする（赤基調だと威圧感が強いため）
                       const style =
                         clearedRate < 0.34
-                          ? "border-red-500 bg-red-50"
+                          ? "border-emerald-200 bg-emerald-50/50"
                           : clearedRate < 0.67
-                            ? "border-amber-500 bg-amber-50"
-                            : "border-stone-300 bg-white";
+                            ? "border-emerald-300 bg-emerald-50"
+                            : "border-emerald-500 bg-emerald-50";
                       const badgeStyle =
                         clearedRate < 0.34
                           ? "bg-red-600 text-white"
