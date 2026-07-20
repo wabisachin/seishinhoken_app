@@ -2,15 +2,17 @@ import { supabase } from "./supabase";
 
 export type WrongStockEntry = { subject: string; missCount: number };
 
-// 「1回正解しただけで復習ストックから外れる」のは定着の証明として弱いため、
-// 直近3回連続で正解して初めて弱点を克服したとみなす（1回でも間違えれば
-// 連続カウントは振り出しに戻り、即座にストックへ戻る）。
-const REQUIRED_STREAK = 3;
+// 直近の解答が正解なら弱点を克服したとみなす（1回でも間違えれば即座にストックへ戻る）。
+// 以前は3回連続正解を要求していたが、復習ストックが積み上がりすぎてテンポが悪くなる
+// ほうが問題であり、克服後に忘れていないかは記憶の庭（GARDEN_OVERCOME_MIN_DAYS）で
+// 別途確認できるため、1回正解で即座に克服扱いにする方針に変更した。
+const REQUIRED_STREAK = 1;
 
 // 記憶の庭（克服済みだが忘れかけている問題の再出題）関連の定数。
 // 克服してからこの日数以上経過した問題だけが対象になる（忘却曲線を踏まえ、
-// ある程度時間が経ってから記憶の定着を確認する）。
-export const GARDEN_OVERCOME_MIN_DAYS = 30;
+// ある程度時間が経ってから記憶の定着を確認する）。1回正解するとすぐ克服扱いになる分、
+// 記憶の庭側の再確認サイクルは短め(2週間)にして、忘れたまま長期間放置されないようにする。
+export const GARDEN_OVERCOME_MIN_DAYS = 14;
 // 対象問題がこの件数に満たない場合はUIでグレーアウトする（毎回同じ数問を
 // 繰り返し出題するだけになってしまうのを避けるための最低ライン）。
 export const GARDEN_MIN_ELIGIBLE = 30;
@@ -19,7 +21,7 @@ type QuestionStat = {
   subject: string;
   missCount: number;
   trailingCorrect: number;
-  /** 3回連続正解を達成した瞬間のanswered_at。現在克服済み(trailingCorrect>=REQUIRED_STREAK)の場合のみ値を持つ。 */
+  /** 直近の正解のanswered_at。現在克服済み(trailingCorrect>=REQUIRED_STREAK)の場合のみ値を持つ。 */
   overcomeAt: string | null;
 };
 
@@ -50,12 +52,11 @@ async function computeQuestionStats(profile: string): Promise<Map<number, Questi
       if (history[i].is_correct) trailingCorrect++;
       else break;
     }
-    // 克服の瞬間 = 直近の連続正解ランの中で、REQUIRED_STREAK個目の正解がついた時点
-    // （それ以降さらに正解が続いていても、克服そのものはその時点で成立している）。
-    const overcomeAt =
-      trailingCorrect >= REQUIRED_STREAK
-        ? history[history.length - trailingCorrect + REQUIRED_STREAK - 1].answered_at
-        : null;
+    // 克服の瞬間 = 直近の正解のanswered_at。記憶の庭で再テストして正解した場合も
+    // ここが更新されることで、そこから改めてGARDEN_OVERCOME_MIN_DAYS日のカウントダウンが
+    // 始まる（更新されないと、一度対象になった問題が正解し続けても「経過日数」が
+    // 伸び続けてしまい、記憶の庭でずっと最優先で出続けてしまう）。
+    const overcomeAt = trailingCorrect >= REQUIRED_STREAK ? history[history.length - 1].answered_at : null;
     stats.set(questionId, { subject, missCount, trailingCorrect, overcomeAt });
   }
   return stats;
@@ -143,7 +144,11 @@ export async function computeGardenEligible(profile: string): Promise<Map<number
   const now = Date.now();
   const result = new Map<number, GardenEntry>();
   for (const [questionId, { subject, missCount, trailingCorrect, overcomeAt }] of stats) {
-    if (trailingCorrect < REQUIRED_STREAK || !overcomeAt) continue;
+    // 一度も間違えたことが無い問題（＝そもそも弱点ではなかった問題）は対象外。
+    // REQUIRED_STREAKが3だった頃はtrailingCorrect>=3にほぼ自然に絞られていたため
+    // 暗黙のガードで足りていたが、1になった今は「直近の解答が正解」なだけの
+    // 大多数の問題まで含んでしまうため、明示的にmissCount>0を要求する
+    if (missCount === 0 || trailingCorrect < REQUIRED_STREAK || !overcomeAt) continue;
     const daysSinceOvercome = Math.floor((now - new Date(overcomeAt).getTime()) / 86_400_000);
     if (daysSinceOvercome < GARDEN_OVERCOME_MIN_DAYS) continue;
     result.set(questionId, { subject, missCount, overcomeAt, daysSinceOvercome });

@@ -599,7 +599,7 @@ export default function Dashboard() {
               <p className="mt-1 text-sm text-stone-500">
                 これまで間違えた{everMissed}問のうち{everMissed - totalWrong}問を克服済み（{consumedPercent}%消化）
               </p>
-              <p className="mt-1 text-xs text-stone-400">※同一の問題を3回連続で正解すると克服したとみなします</p>
+              <p className="mt-1 text-xs text-stone-400">※同一の問題に正解すると克服したとみなします</p>
             </div>
           </div>
         )}

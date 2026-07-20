@@ -4,9 +4,9 @@ import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContai
 
 // 忘却曲線（エビングハウスの忘却曲線の考え方に基づく、実データではないイメージ図）。
 // 「復習しない場合」は指数関数的に記憶保持率が下がり続けるが、「記憶の庭で復習した場合」は
-// 克服から30日後（記憶の庭の対象になるタイミング）に思い出す機会があることで、その後の
+// 克服から14日後（記憶の庭の対象になるタイミング）に思い出す機会があることで、その後の
 // 減衰が緩やかになる ── という記憶の庭の設計思想を視覚的に示す。
-const REVIEW_DAY = 30;
+const REVIEW_DAY = 14;
 
 function withoutReview(day: number): number {
   return Math.round(100 * Math.exp(-day / 12));

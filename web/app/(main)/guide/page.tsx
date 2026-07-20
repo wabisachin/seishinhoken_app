@@ -130,19 +130,19 @@ export default function GuidePage() {
       <section className="rounded-2xl bg-white p-5 shadow-warm">
         <h2 className="font-bold text-emerald-700">🌱 記憶の庭について</h2>
         <p className="mt-2 text-sm leading-relaxed text-stone-700">
-          間違えた問題は、同じ問題で3回連続正解すると「克服」したとみなされ、復習の対象から
+          間違えた問題は、同じ問題で正解すると「克服」したとみなされ、復習の対象から
           外れます。しかし人の記憶は時間とともに薄れていくもの（忘却曲線）で、一度克服した
-          問題も、数カ月経てば忘れている可能性があります。
+          問題も、時間が経てば忘れている可能性があります。
         </p>
         <div className="mt-3">
           <ForgettingCurve />
         </div>
         <p className="mt-2 text-sm leading-relaxed text-stone-700">
-          記憶の庭は、この考え方に基づき、<strong className="font-bold">克服してから1カ月以上経った問題</strong>
+          記憶の庭は、この考え方に基づき、<strong className="font-bold">克服してから2週間以上経った問題</strong>
           を全分野横断で再テストする場所です（復習モードの選択画面から入れます）。克服が
-          古いものほど、元々間違えた回数が多かったものほど出やすくなっています。対象問題が
+          古い（＝対象になってから長く経っている）問題から順に出題されます。対象問題が
           30問に満たない間はまだ選べません。記憶の庭でもし間違えたら、その問題は通常の
-          復習ストックに戻り、また3回連続正解を目指すことになります。
+          復習ストックに戻り、また正解を目指すことになります。
         </p>
       </section>
 

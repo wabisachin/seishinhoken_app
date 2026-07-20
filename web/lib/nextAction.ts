@@ -488,7 +488,7 @@ export async function computeNextAction(
     "- review: 復習モード（対象科目を1つ指定。過去に間違えて、まだ克服できていない問題だけを解き直す）",
     "- mock: 全科目演習（共通科目12科目または専門科目6科目のどちらかを1問ずつ横断。partに\"common\"か\"specialized\"を必ず指定すること。手薄な科目を広く埋める・ストックを増やす）",
     examFeasible ? "- exam: 実戦模試（本番同形式・未出題の問題だけで力試し）" : null,
-    gardenFeasible ? "- garden: 記憶の庭（克服済みだが1カ月以上前に克服した、忘れかけている問題の再テスト）" : null,
+    gardenFeasible ? "- garden: 記憶の庭（克服済みだが2週間以上前に克服した、忘れかけている問題の再テスト）" : null,
   ]
     .filter(Boolean)
     .join("\n");
@@ -587,7 +587,7 @@ ${planLines ? `${planLines}（進捗 ${planProgress?.doneTotal ?? 0}/${planProgr
   ある程度進んだ節目ごとに計画的に受けるのが望ましいペースです。今月すでに何度も受験している、
   もしくは前回受験からまだ日が浅い場合は、残り回数があっても演習（科目別演習・全科目演習）を
   優先し、実戦模試は勧めないでください
-- 記憶の庭（克服済みだが1カ月以上前に克服し忘れかけている問題の再テスト）: ${
+- 記憶の庭（克服済みだが2週間以上前に克服し忘れかけている問題の再テスト）: ${
     gardenFeasible
       ? `対象${gardenSummary.eligibleCount}問、前回実施は${gardenSummary.lastPlayedAt ? new Date(gardenSummary.lastPlayedAt).toLocaleDateString("ja-JP") : "未実施"}。合否に直結する優先度は高くないので、他に優先すべき苦手が無く久しく実施していない場合の選択肢としてください`
       : `対象${gardenSummary.eligibleCount}/${GARDEN_MIN_ELIGIBLE}問でまだ選べません`

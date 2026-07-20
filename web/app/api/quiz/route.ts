@@ -78,7 +78,7 @@ export async function GET(req: NextRequest) {
     }
 
     if (mode === "review") {
-      // 弱点ストック（一度でも間違えたことがあり、直近3問連続正解で卒業していない問題）を対象にする。
+      // 弱点ストック（一度でも間違えたことがあり、直近の解答が正解で卒業していない問題）を対象にする。
       // アクティブなprofile（本人／動作テスト用）の解答だけを対象にし、応援する人の解答は無視する
       const reviewSubject = params.get("subject"); // 未指定 or "all" なら全科目対象
       const wrongStock = await computeWrongStock(profile);
@@ -105,15 +105,15 @@ export async function GET(req: NextRequest) {
     }
 
     if (mode === "garden") {
-      // 記憶の庭: 克服済み(3回連続正解済み)だが、克服してから一定期間(30日)以上
+      // 記憶の庭: 克服済み(直近の解答が正解)だが、克服してから一定期間(14日)以上
       // 経過した問題を再出題する。新規生成は一切トリガーしない（既存問題のみ）。
-      // 「克服が古い問題ほど」「元々間違えた回数が多かった問題ほど」選ばれやすいよう、
-      // 両者を掛け合わせた重みで抽選する（web/lib/reviewStock.ts参照）。
+      // 「記憶の庭の対象に入ったのが古い問題から」出す方針のため、重み付き抽選ではなく
+      // 克服からの経過日数が長い(＝対象になってから長く待たされている)順に決定的に選ぶ。
       const eligible = await computeGardenEligible(profile);
-      const targetIds = weightedPickIds(
-        [...eligible.entries()].map(([id, e]) => ({ id, weight: e.daysSinceOvercome * Math.max(1, e.missCount) })),
-        count,
-      );
+      const targetIds = [...eligible.entries()]
+        .sort((a, b) => b[1].daysSinceOvercome - a[1].daysSinceOvercome)
+        .slice(0, count)
+        .map(([id]) => id);
       if (targetIds.length === 0) return NextResponse.json({ questions: [] });
 
       const { data, error: qError } = await sb

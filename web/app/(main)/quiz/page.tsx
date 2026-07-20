@@ -40,7 +40,7 @@ const MAX_SESSION_COUNT = 10;
 // 科目別演習のコスト上限用カウント(count状態)とは無関係に、独自の出題数を使う。
 const REVIEW_COUNT = 10;
 
-// 記憶の庭（克服済みだが1カ月以上前に克服し忘れかけている問題の再出題）が選べるようになる
+// 記憶の庭（克服済みだが2週間以上前に克服し忘れかけている問題の再出題）が選べるようになる
 // 最低対象件数。lib/reviewStock.tsのGARDEN_MIN_ELIGIBLEと同じ値を独立に持つ
 // （サーバー専用のそちらをクライアントから直接importできないため）。
 const GARDEN_MIN_ELIGIBLE = 30;
@@ -622,7 +622,7 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
               >
                 <p className="font-bold text-emerald-700">🌱 記憶の庭</p>
                 <p className="mt-1 text-sm text-stone-600">
-                  克服済みだが1カ月以上前で忘れかけている問題を再テスト（対象{gardenSummary.eligibleCount}問）
+                  克服済みだが2週間以上前で忘れかけている問題を再テスト（対象{gardenSummary.eligibleCount}問）
                 </p>
                 <p className="mt-1 text-xs text-stone-400">
                   {gardenSummary.lastPlayedAt
@@ -657,7 +657,7 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
                 </button>
                 <div>
                   <p className="mb-0.5 text-sm font-medium text-stone-700">科目ごとに復習する</p>
-                  <p className="mb-2 text-xs text-stone-400">※同一の問題を3回連続で正解すると克服したとみなします</p>
+                  <p className="mb-2 text-xs text-stone-400">※同一の問題に正解すると克服したとみなします</p>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     {reviewSubjects.map((s) => {
                       // ゴールまでの距離（あと何問でクリアか）で表示する。正答率は
@@ -695,9 +695,9 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
         {mode === "garden" && !error && (
           <div className="rounded-2xl border-l-4 border-emerald-400 bg-white p-5 shadow-warm">
             <p className="text-sm leading-relaxed text-stone-700">
-              記憶の庭は、一度は間違えて3回連続正解まで克服したものの、克服から1カ月以上が経ち
-              忘れかけている可能性がある問題を再テストする場所です。忘却曲線を踏まえ、克服が
-              古いものほど、元々間違えた回数が多かったものほど出やすくなっています。
+              記憶の庭は、一度は間違えて正解し克服したものの、克服から2週間以上が経ち
+              忘れかけている可能性がある問題を再テストする場所です。忘却曲線を踏まえ、
+              対象になった（克服した）のが古い問題から順に出題されます。
               <strong className="font-bold text-emerald-700">ここで間違えると、その問題は復習ストックに戻ります。</strong>
             </p>
             {gardenSummary && (

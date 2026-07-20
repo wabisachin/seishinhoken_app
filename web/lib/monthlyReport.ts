@@ -13,7 +13,9 @@ import { computePartResult, computeVerdict, type ExamAttemptRow } from "./examMo
 // (b) 1カ月分だけでは統計的に心もとない（弱点の傾向を導くにはある程度のサンプルが要る）。
 // 大きくするほど分析精度は上がるがLLMコストも上がるため60件に固定する。
 const MISTAKE_ANALYSIS_WINDOW = 60;
-const REQUIRED_STREAK = 3;
+// web/lib/reviewStock.tsのREQUIRED_STREAKと同じ考え方（1回正解で克服とみなす）を
+// 独立に持つ定数
+const REQUIRED_STREAK = 1;
 
 function monthKey(dateStr: string): string {
   return dateStr.slice(0, 7);
@@ -184,8 +186,8 @@ async function fetchExamMonthSummary(profile: string, periodMonth: string): Prom
  * 対象月(periodMonth="YYYY-MM")の決定的な集計。LLMは使わない。
  * - answeredThisMonth: 今月解答した問題数（重複除去）
  * - newWeaknessesDiscovered: 「初めて間違えた日」が今月だった問題数
- * - weaknessesOvercome: 「3連続正解に初めて到達した瞬間」が今月だった回数
- *   （克服後に再び間違えて、その後また3連続正解に到達すれば再克服として再度カウントする）
+ * - weaknessesOvercome: 「間違えた後に初めて正解した瞬間」が今月だった回数
+ *   （克服後に再び間違えて、その後また正解すれば再克服として再度カウントする）
  */
 function computeMonthMetrics(histories: Map<number, QuestionHistory>, periodMonth: string): Omit<MonthMetrics, "examSummary"> {
   let answeredThisMonth = 0;

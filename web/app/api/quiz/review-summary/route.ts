@@ -13,7 +13,7 @@ import { isValidProfile } from "@/lib/profile";
  * （復習モードの選択肢は wrongCount > 0 の科目だけに絞る。ホーム画面の弱点マップは
  * 克服済み科目も含めて全科目を表示する）。
  * 苦手科目の判定は正答率ではなく「間違えたまま残っている問題の総数」で行う
- * （このアプリの学習ゴールは、一度間違えた問題を同一問題で3回連続正解させて
+ * （このアプリの学習ゴールは、一度間違えた問題を同一問題で正解させて
  * 克服することであり、正答率という統計量で評価するものではないため）。
  */
 export async function GET(req: NextRequest) {
@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
     if (error) throw new Error(error.message);
 
     // 弱点ストック（今も間違えたまま残っている問題数）は、一度でも間違えたことがあり
-    // 直近3問連続正解で卒業していない問題の数。これは全期間で見る（間違えた問題は
+    // 直近の解答が正解で卒業していない問題の数。これは全期間で見る（間違えた問題は
     // 解き直して正解するまでずっとストックに残るのがこのアプリの学習ゴールであり、
     // 直近何件かで判定するものではない）
     const [progress, progressBySubject] = await Promise.all([
@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
     const totalWrong = progress.currentWrong;
 
     // 解答数は「これまでに出題された、重複の無い問題の数」（窓で区切らない全期間）。
-    // attemptsの行数をそのまま数えると、復習モードで同じ問題を3問連続正解するまで
+    // attemptsの行数をそのまま数えると、復習モードで同じ問題を正解するまで
     // 何度も解き直した分だけ水増しされてしまい、「どれだけの問題数に触れたか」という
     // 本来知りたい指標とズレるため、question_idの重複を除いてから数える
     const questionIdsBySubject = new Map<string, Set<number>>();
