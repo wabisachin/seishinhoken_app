@@ -302,9 +302,15 @@ function ReportDetailInner() {
                     const practiceQuestions = s.practiceSets * plan.setSize;
                     return (
                       <tr key={s.subject} className="border-b border-stone-100 last:border-0">
-                        <td className="max-w-0 truncate py-1.5 pr-2 text-stone-700">{s.subject}</td>
-                        <td className="py-1.5 text-right text-stone-600">{reviewQuestions > 0 ? `${reviewQuestions}問` : "―"}</td>
-                        <td className="py-1.5 text-right text-stone-600">{practiceQuestions > 0 ? `${practiceQuestions}問` : "―"}</td>
+                        {/* 科目名だけはこのセクションに限り絶対に途切れさせない
+                            （数値2列はwhitespace-nowrapで小さく保ち、残りの幅を科目名に譲る） */}
+                        <td className="py-1.5 pr-2 text-stone-700">{s.subject}</td>
+                        <td className="whitespace-nowrap py-1.5 text-right text-stone-600">
+                          {reviewQuestions > 0 ? `${reviewQuestions}問` : "―"}
+                        </td>
+                        <td className="whitespace-nowrap py-1.5 text-right text-stone-600">
+                          {practiceQuestions > 0 ? `${practiceQuestions}問` : "―"}
+                        </td>
                       </tr>
                     );
                   })}

@@ -356,6 +356,7 @@ export default function Dashboard() {
   const [nextAction, setNextAction] = useState<NextAction | null>(null);
   const [nextActionLoading, setNextActionLoading] = useState(true);
   const [planProgress, setPlanProgress] = useState<PlanProgress | null>(null);
+  const [showAllPlanSubjects, setShowAllPlanSubjects] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -522,7 +523,7 @@ export default function Dashboard() {
           {(() => {
             const remaining = planProgress.bySubject.filter((s) => s.done < s.target).sort((a, b) => b.target - b.done - (a.target - a.done));
             const SHOWN = 4;
-            const shown = remaining.slice(0, SHOWN);
+            const shown = showAllPlanSubjects ? remaining : remaining.slice(0, SHOWN);
             if (remaining.length === 0) {
               return <p className="mt-3 text-sm font-medium text-emerald-600">🎉 今月の目標科目はすべて達成しました</p>;
             }
@@ -547,7 +548,13 @@ export default function Dashboard() {
                   </div>
                 ))}
                 {remaining.length > SHOWN && (
-                  <p className="text-xs text-stone-400">ほか{remaining.length - SHOWN}科目が未達です</p>
+                  <button
+                    type="button"
+                    onClick={() => setShowAllPlanSubjects((v) => !v)}
+                    className="text-xs font-medium text-indigo-600 underline underline-offset-2"
+                  >
+                    {showAllPlanSubjects ? "閉じる" : `+ ほか${remaining.length - SHOWN}科目を表示`}
+                  </button>
                 )}
               </div>
             );

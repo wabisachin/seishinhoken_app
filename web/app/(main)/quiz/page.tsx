@@ -661,23 +661,11 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
                     {reviewSubjects.map((s) => {
                       // ゴールまでの距離（あと何問でクリアか）で表示する。正答率は
                       // 「これまで何問中何問正解したか」の実感が薄く、目標（弱点ゼロ）
-                      // までの距離のほうが次にすべきことが分かりやすいため
+                      // までの距離のほうが次にすべきことが分かりやすいため。
+                      // 進捗の濃淡をカード側で段階的に表現するのはやめた（「残りN問」の
+                      // 数字自体が進捗を語るので冗長。カード・バッジとも一律の見た目にし、
+                      // 特別感は「完全にクリアした（このリストから消える）」ことそのもので表す）
                       const cleared = Math.max(0, s.everMissed - s.wrongCount);
-                      const clearedRate = s.everMissed > 0 ? cleared / s.everMissed : 0;
-                      // カードの基調色は「残り問題数」バッジ（赤）とは別に、進捗が伝わる
-                      // 柔らかいグリーンの濃淡にする（赤基調だと威圧感が強いため）
-                      const style =
-                        clearedRate < 0.34
-                          ? "border-emerald-200 bg-emerald-50/50"
-                          : clearedRate < 0.67
-                            ? "border-emerald-300 bg-emerald-50"
-                            : "border-emerald-500 bg-emerald-50";
-                      const badgeStyle =
-                        clearedRate < 0.34
-                          ? "bg-red-600 text-white"
-                          : clearedRate < 0.67
-                            ? "bg-amber-500 text-white"
-                            : "bg-stone-200 text-stone-700";
                       return (
                         <button
                           key={s.subject}
@@ -685,13 +673,11 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
                             setSubject(s.subject);
                             void start();
                           }}
-                          className={`flex items-center justify-between rounded-xl border-l-4 p-3 text-left shadow-warm-sm transition-all hover:-translate-y-0.5 hover:shadow-warm ${style}`}
+                          className="flex items-center justify-between rounded-xl border-l-4 border-emerald-400 bg-white p-3 text-left shadow-warm-sm transition-all hover:-translate-y-0.5 hover:shadow-warm"
                         >
                           <span className="text-sm font-medium text-stone-800">{s.subject}</span>
                           <span className="ml-2 flex shrink-0 flex-col items-end">
-                            <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${badgeStyle}`}>
-                              残り{s.wrongCount}問
-                            </span>
+                            <span className="rounded-full bg-red-600 px-2.5 py-1 text-xs font-bold text-white">残り{s.wrongCount}問</span>
                             <span className="mt-1 text-xs text-stone-400">
                               {s.everMissed}問中{cleared}問クリア
                             </span>
