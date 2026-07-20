@@ -141,17 +141,6 @@ export default function GuidePage() {
       </section>
 
       <section className="rounded-2xl bg-white p-5 shadow-warm">
-        <h2 className="font-bold text-indigo-700">「問題を準備しています」と出たら</h2>
-        <p className="mt-2 text-sm leading-relaxed text-stone-700">
-          このアプリはAIが問題を書き上げていますが、各科目とも「まだ出したことのない問題」を
-          常に何問か裏側でストックしておく仕組みになっているため、通常はこの画面を見ることは
-          ほとんどありません。ストックがたまたま切れているタイミングなど、まれにその場で
-          新しい問題を用意することがあり、その場合だけ20〜40秒ほどかかります。表示されたら
-          少しだけそのままお待ちください。自動的に問題が表示されます。
-        </p>
-      </section>
-
-      <section className="rounded-2xl bg-white p-5 shadow-warm">
         <h2 className="font-bold text-emerald-700">🌱 想起の庭について</h2>
         <p className="mt-2 text-sm leading-relaxed text-stone-700">
           間違えた問題は、同じ問題で正解すると「克服」したとみなされ、復習の対象から
@@ -223,6 +212,17 @@ export default function GuidePage() {
           科目別演習や全科目演習の途中でブラウザを閉じたり、リロードしてしまっても大丈夫です。
           次にそのモードを開いたときに「前回の続きから再開しますか？」という案内が出るので、
           そこから続けるか、新しく始めるかを選べます。
+        </p>
+      </section>
+
+      <section className="rounded-2xl bg-white p-5 shadow-warm">
+        <h2 className="font-bold text-indigo-700">「問題を準備しています」と出たら</h2>
+        <p className="mt-2 text-sm leading-relaxed text-stone-700">
+          このアプリはAIが問題を書き上げていますが、各科目とも「まだ出したことのない問題」を
+          常に何問か裏側でストックしておく仕組みになっているため、通常はこの画面を見ることは
+          ほとんどありません。ストックがたまたま切れているタイミングなど、まれにその場で
+          新しい問題を用意することがあり、その場合だけ20〜40秒ほどかかります。表示されたら
+          少しだけそのままお待ちください。自動的に問題が表示されます。
         </p>
       </section>
     </div>
