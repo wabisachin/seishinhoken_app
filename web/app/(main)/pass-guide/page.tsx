@@ -1,4 +1,8 @@
-import { EXAM_SUBJECT_COUNTS, EXAM_SUBJECT_GROUPS } from "@/lib/examFormat";
+import { EXAM_SUBJECT_COUNTS, EXAM_SUBJECT_GROUPS, EXAM_ROUND_LABEL, EXAM_DATE_START, EXAM_DATE_END, daysUntilExam } from "@/lib/examFormat";
+
+// daysUntilExam()は「今」に依存するため、ビルド時に静的プリレンダリングされて
+// 日数が固定化されないよう、このページを動的レンダリングに固定する。
+export const dynamic = "force-dynamic";
 
 const SUBJECT_GROUPS = EXAM_SUBJECT_GROUPS;
 
@@ -40,6 +44,19 @@ export default function PassGuidePage() {
         出題基準PDF・過去問（第27回・第28回）・厚生労働省の養成課程カリキュラム・合格基準発表資料をもとにまとめています。
         年度によって変わる数値（合格ラインの実際の点数など）は、直近の回の実績として記載しています。
       </p>
+
+      <section className="rounded-2xl border-l-4 border-indigo-500 bg-white p-5 shadow-warm">
+        <h2 className="font-bold text-indigo-700">次の本番</h2>
+        <p className="mt-2 text-2xl font-bold text-stone-800">
+          {EXAM_ROUND_LABEL}・あと{daysUntilExam()}日
+        </p>
+        <p className="mt-1 text-sm text-stone-600">
+          {EXAM_DATE_START.replace(/-/g, "/")} 〜 {EXAM_DATE_END.slice(8)}日 実施予定
+        </p>
+        <p className="mt-2 text-xs text-stone-500">
+          この試験日から逆算して、おすすめの次の一手・月次の学習プランを提案しています。
+        </p>
+      </section>
 
       <section className="rounded-2xl bg-white p-5 shadow-warm">
         <h2 className="font-bold text-indigo-700">この試験の全体像</h2>

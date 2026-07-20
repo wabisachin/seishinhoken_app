@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { logError } from "@/lib/errorLog";
-import { getWrongStockProgress, getWrongStockProgressBySubject } from "@/lib/reviewStock";
+import { getWrongStockProgress, getWrongStockProgressBySubject, getGardenSummary } from "@/lib/reviewStock";
 import { listSubjects } from "@/lib/subjects";
 import { getStockSnapshot, SUBJECT_TARGET } from "@/lib/questionSupply";
 import { isValidProfile } from "@/lib/profile";
@@ -21,10 +21,11 @@ export async function GET(req: NextRequest) {
     const profile = req.nextUrl.searchParams.get("profile");
     if (!isValidProfile(profile)) return NextResponse.json({ error: "profile is required" }, { status: 400 });
 
-    const [{ data: attempts, error }, allSubjects, stockSnapshot] = await Promise.all([
+    const [{ data: attempts, error }, allSubjects, stockSnapshot, gardenSummary] = await Promise.all([
       supabase().from("attempts").select("question_id, questions!inner(subject)").eq("profile", profile),
       listSubjects(),
       getStockSnapshot(profile),
+      getGardenSummary(profile),
     ]);
     if (error) throw new Error(error.message);
 
@@ -76,7 +77,7 @@ export async function GET(req: NextRequest) {
         return a.total - b.total;
       });
 
-    return NextResponse.json({ subjects, totalWrong, everMissed: progress.everMissed });
+    return NextResponse.json({ subjects, totalWrong, everMissed: progress.everMissed, garden: gardenSummary });
   } catch (e) {
     await logError("review-summary", e);
     const message = e instanceof Error ? e.message : String(e);

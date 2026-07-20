@@ -35,9 +35,14 @@ const MAX_NEXT_ATTEMPTS = 15;
 const DEFAULT_SESSION_COUNT = 5;
 const MAX_SESSION_COUNT = 10;
 
-// 復習モードは新規生成を一切行わない（既存問題の読み出しのみ）ため、
+// 復習モード・記憶の庭は新規生成を一切行わない（既存問題の読み出しのみ）ため、
 // 科目別演習のコスト上限用カウント(count状態)とは無関係に、独自の出題数を使う。
 const REVIEW_COUNT = 10;
+
+// 記憶の庭（克服済みだが1カ月以上前に克服し忘れかけている問題の再出題）が選べるようになる
+// 最低対象件数。lib/reviewStock.tsのGARDEN_MIN_ELIGIBLEと同じ値を独立に持つ
+// （サーバー専用のそちらをクライアントから直接importできないため）。
+const GARDEN_MIN_ELIGIBLE = 30;
 
 // 科目別演習の途中経過をlocalStorageに保存し、リロード/離脱後に再開できるようにする
 const SUBJECT_SESSION_KEY = "quiz_session_subject_v1";
@@ -135,6 +140,7 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
   const [reviewSubjects, setReviewSubjects] = useState<ReviewSubjectSummary[]>([]);
   const [reviewTotalWrong, setReviewTotalWrong] = useState(0);
   const [reviewSummaryLoading, setReviewSummaryLoading] = useState(true);
+  const [gardenSummary, setGardenSummary] = useState<{ eligibleCount: number; lastPlayedAt: string | null } | null>(null);
   const cancelledRef = useRef(false);
   // 分野別モード: セッション開始直後から、残り問題を裏で連続的に先読みしておく
   // （1問先読みだけだと、読むのが速いユーザーには追いつけないため、模試の
@@ -150,13 +156,14 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
         .then((r) => r.json())
         .then((d) => setSubjects((d.subjects ?? []).filter((s: { taxonomy_items: number }) => s.taxonomy_items > 0)));
     }
-    if (mode === "review") {
+    if (mode === "review" || mode === "garden") {
       setReviewSummaryLoading(true);
       fetch(`/api/quiz/review-summary?profile=${getStoredProfile() ?? "self"}`)
         .then((r) => r.json())
         .then((d) => {
           setReviewSubjects(reviewCandidates(d.subjects ?? []));
           setReviewTotalWrong(d.totalWrong ?? 0);
+          setGardenSummary(d.garden ?? null);
         })
         .finally(() => setReviewSummaryLoading(false));
     }
@@ -317,7 +324,7 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
 
     const qs = new URLSearchParams({
       mode,
-      count: String(mode === "review" ? REVIEW_COUNT : count),
+      count: String(mode === "review" || mode === "garden" ? REVIEW_COUNT : count),
       profile: getStoredProfile() ?? "self",
     });
     if (mode === "review") qs.set("subject", subjectOverride ?? subject ?? "all");
@@ -479,7 +486,9 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
   if (phase === "setup") {
     return (
       <div className="space-y-4">
-        <h1 className="text-xl font-bold">{mode === "subject" ? "科目別演習" : "復習モード"}</h1>
+        <h1 className="text-xl font-bold">
+          {mode === "subject" ? "科目別演習" : mode === "garden" ? "記憶の庭" : "復習モード"}
+        </h1>
         {error && <p className="rounded bg-amber-100 p-3 text-sm text-amber-800">{error}</p>}
         {mode === "subject" && (
           <div className="rounded-2xl bg-white p-5 shadow-warm">
@@ -582,6 +591,38 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
         )}
         {mode === "review" && !error && (
           <>
+            {/* 記憶の庭への入り口。復習モードの下に置く（ユーザー指示）。対象30問未満は
+                グレーアウトして選択できないようにする（毎回同じ数問の繰り返しになるのを防ぐため）。 */}
+            {!reviewSummaryLoading && gardenSummary && (
+              <div
+                className={`mb-3 rounded-2xl border-l-4 p-4 shadow-warm ${
+                  gardenSummary.eligibleCount >= GARDEN_MIN_ELIGIBLE
+                    ? "border-emerald-400 bg-white"
+                    : "cursor-not-allowed border-stone-300 bg-stone-100 opacity-60"
+                }`}
+              >
+                {gardenSummary.eligibleCount >= GARDEN_MIN_ELIGIBLE ? (
+                  <Link href="/quiz?mode=garden" className="block">
+                    <p className="font-bold text-emerald-700">🌱 記憶の庭</p>
+                    <p className="mt-1 text-sm text-stone-600">
+                      克服済みだが1カ月以上前で忘れかけている問題を再テスト（対象{gardenSummary.eligibleCount}問）
+                    </p>
+                    <p className="mt-1 text-xs text-stone-400">
+                      {gardenSummary.lastPlayedAt
+                        ? `前回実施: ${new Date(gardenSummary.lastPlayedAt).toLocaleDateString("ja-JP")}`
+                        : "まだ実施していません"}
+                    </p>
+                  </Link>
+                ) : (
+                  <>
+                    <p className="font-bold text-stone-500">🌱 記憶の庭</p>
+                    <p className="mt-1 text-sm text-stone-500">
+                      対象問題 {gardenSummary.eligibleCount}/{GARDEN_MIN_ELIGIBLE}問（もう少し克服が進むと選べるようになります）
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
             {reviewSummaryLoading ? (
               <p className="text-sm text-stone-600">読み込み中...</p>
             ) : reviewSubjects.length === 0 ? (
@@ -655,7 +696,30 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
             )}
           </>
         )}
-        {mode !== "subject" && mode !== "review" && error && (
+        {mode === "garden" && !error && (
+          <div className="rounded-2xl border-l-4 border-emerald-400 bg-white p-5 shadow-warm">
+            <p className="text-sm leading-relaxed text-stone-700">
+              記憶の庭は、一度は間違えて3回連続正解まで克服したものの、克服から1カ月以上が経ち
+              忘れかけている可能性がある問題を再テストする場所です。忘却曲線を踏まえ、克服が
+              古いものほど、元々間違えた回数が多かったものほど出やすくなっています。
+              <strong className="font-bold text-emerald-700">ここで間違えると、その問題は復習ストックに戻ります。</strong>
+            </p>
+            {gardenSummary && (
+              <p className="mt-2 text-xs text-stone-400">
+                対象{gardenSummary.eligibleCount}問
+                {gardenSummary.lastPlayedAt && `・前回実施: ${new Date(gardenSummary.lastPlayedAt).toLocaleDateString("ja-JP")}`}
+              </p>
+            )}
+            <button
+              onClick={() => void start()}
+              disabled={!gardenSummary || gardenSummary.eligibleCount < GARDEN_MIN_ELIGIBLE}
+              className="mt-4 min-h-12 w-full rounded-xl bg-emerald-600 px-5 py-3 font-medium text-white hover:bg-emerald-700 transition-colors disabled:opacity-40 sm:w-auto"
+            >
+              始める
+            </button>
+          </div>
+        )}
+        {mode !== "subject" && mode !== "review" && mode !== "garden" && error && (
           <Link href="/" className="inline-flex min-h-12 items-center rounded-xl bg-indigo-600 px-5 py-3 font-medium text-white transition-colors hover:bg-indigo-700">
             ダッシュボードへ
           </Link>
@@ -717,15 +781,16 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
             onClick={() => {
               setQuestions([]);
               setError(null);
-              if (mode === "review") {
+              if (mode === "review" || mode === "garden") {
                 // 科目選択をやり直せるよう、選択画面に戻す（成績が変わっている可能性もあるため
-                // 苦手科目の集計も再取得する）
+                // 苦手科目・記憶の庭の対象件数も再取得する）
                 setReviewSummaryLoading(true);
                 fetch(`/api/quiz/review-summary?profile=${getStoredProfile() ?? "self"}`)
                   .then((r) => r.json())
                   .then((d) => {
                     setReviewSubjects(reviewCandidates(d.subjects ?? []));
                     setReviewTotalWrong(d.totalWrong ?? 0);
+                    setGardenSummary(d.garden ?? null);
                   })
                   .finally(() => setReviewSummaryLoading(false));
               }

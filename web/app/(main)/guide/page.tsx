@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getStoredProfile, type UserProfile } from "@/lib/profile";
+import ForgettingCurve from "./ForgettingCurve";
 
 export default function GuidePage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -123,6 +124,36 @@ export default function GuidePage() {
           「見て覚える！国試ナビ」はイラスト中心で図解がわかりやすい教材です。調べたい言葉を
           入力すると、意味の近いページを画像で見つけて表示します。解説画面でも、関連する
           国試ナビのページがあれば「関連する国試ナビのページ」として自動的に案内されます。
+        </p>
+      </section>
+
+      <section className="rounded-2xl bg-white p-5 shadow-warm">
+        <h2 className="font-bold text-emerald-700">🌱 記憶の庭について</h2>
+        <p className="mt-2 text-sm leading-relaxed text-stone-700">
+          間違えた問題は、同じ問題で3回連続正解すると「克服」したとみなされ、復習の対象から
+          外れます。しかし人の記憶は時間とともに薄れていくもの（忘却曲線）で、一度克服した
+          問題も、数カ月経てば忘れている可能性があります。
+        </p>
+        <div className="mt-3">
+          <ForgettingCurve />
+        </div>
+        <p className="mt-2 text-sm leading-relaxed text-stone-700">
+          記憶の庭は、この考え方に基づき、<strong className="font-bold">克服してから1カ月以上経った問題</strong>
+          を全分野横断で再テストする場所です（復習モードの選択画面から入れます）。克服が
+          古いものほど、元々間違えた回数が多かったものほど出やすくなっています。対象問題が
+          30問に満たない間はまだ選べません。記憶の庭でもし間違えたら、その問題は通常の
+          復習ストックに戻り、また3回連続正解を目指すことになります。
+        </p>
+      </section>
+
+      <section className="rounded-2xl bg-white p-5 shadow-warm">
+        <h2 className="font-bold text-indigo-700">学習の振り返りレポートについて</h2>
+        <p className="mt-2 text-sm leading-relaxed text-stone-700">
+          月が変わると、前月の学習を振り返るレポートが自動的に作られます。解いた問題数・
+          新しく見つかった弱点・克服した弱点に加えて、間違え方の傾向（事例問題に弱い、
+          似た名称を混同しやすい、など）を個々の問題まで踏み込んで分析し、次の月に取り組む
+          べき科目・問題数を具体的な数値で提案します。成績ページの末尾から確認できます。
+          新しいレポートができると、ホーム画面にお知らせが表示されます。
         </p>
       </section>
     </div>

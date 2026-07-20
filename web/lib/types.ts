@@ -1,4 +1,4 @@
-export type Mode = "subject" | "mock" | "review";
+export type Mode = "subject" | "mock" | "review" | "garden";
 
 export type Citation = {
   chunk_id: number;

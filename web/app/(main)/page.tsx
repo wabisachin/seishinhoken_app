@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { EXAM_SUBJECT_COUNTS } from "@/lib/examFormat";
 import { getStoredProfile, profileScopedKey } from "@/lib/profile";
+import ReportPopup from "./reports/ReportPopup";
 
 const SUBJECT_PART: Record<string, "common" | "specialized"> = Object.fromEntries(
   EXAM_SUBJECT_COUNTS.map((s) => [s.subject, s.part]),
@@ -22,14 +23,17 @@ type ExamSummary = {
   thisMonthAccuracy: number;
   subjectsPracticed: number;
 };
-type NextAction = { action: "subject" | "review" | "mock" | "exam"; targetSubject: string | null; reason: string; href: string };
+type NextAction = { action: "subject" | "review" | "mock" | "exam" | "garden"; targetSubject: string | null; reason: string; href: string };
 
 const ACTION_LABEL: Record<NextAction["action"], string> = {
   subject: "科目別演習",
   review: "復習モード",
   mock: "全科目演習",
   exam: "実戦模試",
+  garden: "記憶の庭",
 };
+
+type PlanProgress = { planTotal: number; doneTotal: number; bySubject: { subject: string; target: number; done: number }[] };
 
 // 「おすすめの次の一手」はLLM呼び出しを伴うため、ホーム画面を開くたび（単なるリロードも
 // 含む）に毎回呼ぶとトークンを浪費する。かといって時間で区切ると、短時間に何問も解いて
@@ -343,6 +347,7 @@ export default function Dashboard() {
   const [examRemainingThisMonth, setExamRemainingThisMonth] = useState<number | null>(null);
   const [nextAction, setNextAction] = useState<NextAction | null>(null);
   const [nextActionLoading, setNextActionLoading] = useState(true);
+  const [planProgress, setPlanProgress] = useState<PlanProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -410,6 +415,13 @@ export default function Dashboard() {
         if (!d.error) setExamRemainingThisMonth(d.remainingThisMonth ?? null);
       })
       .catch(() => {});
+
+    fetch(`/api/reports/plan-progress?${profileQuery}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!d.error && d.planTotal !== undefined) setPlanProgress(d);
+      })
+      .catch(() => {});
   }, []);
 
   const consumedPercent = everMissed > 0 ? Math.round((100 * (everMissed - totalWrong)) / everMissed) : null;
@@ -423,6 +435,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      <ReportPopup />
       {/* 前回途中で終えた演習がある場合、専用バナーは出さず「おすすめの次の一手」に
           一本化する（computeNextActionがpendingResumeを最優先で必ず提案するため、
           別のバナーを並べると同じ内容が二重に表示されてしまう） */}
@@ -472,6 +485,28 @@ export default function Dashboard() {
       </section>
 
       {error && <p className="rounded bg-red-100 p-3 text-sm text-red-700">{error}</p>}
+
+      {/* 今月の学習プラン（振り返りレポートが合格基準・本番日から逆算して算出した数値目標の
+          消化状況）。まだレポートが一度も発行されていない場合は表示しない */}
+      {planProgress && planProgress.planTotal > 0 && (
+        <section className="rounded-2xl bg-white p-5 shadow-warm">
+          <div className="flex items-center justify-between">
+            <h2 className="font-bold text-indigo-700">今月の学習プラン</h2>
+            <Link href="/stats" className="text-xs text-stone-400 underline underline-offset-2">
+              振り返りレポートを見る
+            </Link>
+          </div>
+          <p className="mt-1 text-sm text-stone-600">
+            {planProgress.doneTotal} / {planProgress.planTotal}問
+          </p>
+          <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-stone-100">
+            <div
+              className="h-full rounded-full bg-indigo-500 transition-all"
+              style={{ width: `${Math.min(100, Math.round((100 * planProgress.doneTotal) / planProgress.planTotal))}%` }}
+            />
+          </div>
+        </section>
+      )}
 
       {/* 弱点ゼロまで */}
       <section className="rounded-2xl bg-white p-5 shadow-warm">

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { describeFailedGroups } from "@/lib/examFormat";
+import ReportListSection from "../reports/ReportListSection";
 
 type SubjectScore = { subject: string; correct: number; total: number };
 type Verdict = {
@@ -213,6 +214,8 @@ export default function GuardianView() {
           })}
         </div>
       </section>
+
+      <ReportListSection profile="self" />
     </div>
   );
 }

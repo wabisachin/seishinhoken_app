@@ -7,12 +7,13 @@ import { getLlmSettings } from "./appSettings";
 import { logUsage } from "./usageLog";
 import { logError } from "./errorLog";
 import { getStockSnapshot, getExamReadyRounds } from "./questionSupply";
-import { getWrongStockProgress, getWrongStockProgressBySubject } from "./reviewStock";
+import { getWrongStockProgress, getWrongStockProgressBySubject, getGardenSummary, GARDEN_MIN_ELIGIBLE } from "./reviewStock";
 import { countRoundsThisMonth, hasStartedRoundToday, computePartResult, computeVerdict, ExamAttemptRow } from "./examMode";
-import { describeFailedGroups, EXAM_MONTHLY_LIMIT, EXAM_SUBJECT_GROUPS } from "./examFormat";
+import { describeFailedGroups, EXAM_MONTHLY_LIMIT, EXAM_SUBJECT_GROUPS, EXAM_ROUND_LABEL, daysUntilExam } from "./examFormat";
+import { getPlanProgress } from "./monthlyPlan";
 
 export type NextAction = {
-  action: "subject" | "review" | "mock" | "exam";
+  action: "subject" | "review" | "mock" | "exam" | "garden";
   targetSubject: string | null;
   reason: string;
   href: string;
@@ -36,7 +37,7 @@ const UNTOUCHED_THRESHOLD = 3;
 const CONFIDENCE_THRESHOLD = 30;
 
 const NextActionSchema = z.object({
-  action: z.enum(["subject", "review", "mock", "exam"]),
+  action: z.enum(["subject", "review", "mock", "exam", "garden"]),
   targetSubject: z
     .string()
     .nullable()
@@ -47,6 +48,7 @@ const NextActionSchema = z.object({
 function href(action: NextAction["action"], targetSubject: string | null): string {
   if (action === "mock") return "/quiz?mode=mock";
   if (action === "exam") return "/full-mock";
+  if (action === "garden") return "/quiz?mode=garden";
   if (action === "review") return `/quiz?mode=review${targetSubject ? `&subject=${encodeURIComponent(targetSubject)}` : ""}`;
   return `/quiz?mode=subject${targetSubject ? `&subject=${encodeURIComponent(targetSubject)}` : ""}`;
 }
@@ -68,6 +70,9 @@ async function gatherState(pendingResume: PendingResumeInfo | null, profile: str
     attemptedRows,
     latestExamRows,
     examAttemptDetailRows,
+    gardenSummary,
+    planProgress,
+    latestReportRows,
   ] = await Promise.all([
     getStockSnapshot(profile),
     getWrongStockProgress(profile),
@@ -85,6 +90,9 @@ async function gatherState(pendingResume: PendingResumeInfo | null, profile: str
       .order("created_at", { ascending: false })
       .limit(1),
     sb.from("attempts").select("is_correct, questions!inner(subject)").eq("profile", profile).eq("mode", "exam"),
+    getGardenSummary(profile),
+    getPlanProgress(profile),
+    sb.from("monthly_reports").select("id, period_month").eq("profile", profile).order("period_month", { ascending: false }).limit(1),
   ]);
 
   // 「解答数」は重複の無い問題数（同じ問題を復習で何度も解き直した分は水増ししない）。
@@ -207,6 +215,16 @@ async function gatherState(pendingResume: PendingResumeInfo | null, profile: str
     remainingThisMonth > 0 && !startedToday && (readyRounds.common >= 1 || readyRounds.specialized >= 1);
   const knownSubjects = new Set(stockSnapshot.map((s) => s.subject));
 
+  // 記憶の庭（克服済みだが忘れかけている問題の再出題）が今すぐ選べるかどうか。
+  const gardenFeasible = gardenSummary.eligibleCount >= GARDEN_MIN_ELIGIBLE;
+
+  // 本番までの残り日数。日次で値が変わるため、これはプロンプト文脈にのみ使い
+  // stateHash（フィンガープリント）には含めない ── 含めると毎日必ずLLM呼び出しが
+  // 走ってしまい、「状態が変わったら再計算」という設計意図が壊れるため。
+  const examDaysRemaining = daysUntilExam();
+
+  const latestReport = (latestReportRows.data ?? [])[0] as { id: number; period_month: string } | undefined;
+
   // 実戦模試の月内ペース配分をLLMに判断させるための材料（月内に何日残っているか）。
   // 月5回という枠は早い者勝ちで使い切ってよいものではなく、弱点克服の節目ごとに
   // 計画的に消費すべきという方針をプロンプト側で明示する
@@ -233,6 +251,11 @@ async function gatherState(pendingResume: PendingResumeInfo | null, profile: str
   // 何も変わっていなくても、ユーザーが演習を再開して離脱した/最後まで終えたなど
   // localStorageの状態だけが変化した場合に、キャッシュされた古い提案を使い回さないため
   fingerprintParts.push(`pending:${pendingResume ? `${pendingResume.kind}:${pendingResume.subject ?? ""}` : "none"}`);
+  // 新しい月次振り返りレポートが発行された・記憶の庭が開放/非開放に切り替わった、
+  // という変化もキャッシュ再計算のトリガーに含める（本番までの残り日数のような
+  // 日次で必ず変わる値はここには含めない。上のexamDaysRemainingのコメント参照）。
+  fingerprintParts.push(`report:${latestReport?.id ?? "none"}:${latestReport?.period_month ?? ""}`);
+  fingerprintParts.push(`garden:${gardenFeasible ? "on" : "off"}`);
   const stateHash = createHash("sha256").update(fingerprintParts.join("|")).digest("hex").slice(0, 20);
 
   return {
@@ -254,6 +277,10 @@ async function gatherState(pendingResume: PendingResumeInfo | null, profile: str
     startedToday,
     daysLeftInMonth,
     pendingResume,
+    gardenSummary,
+    gardenFeasible,
+    planProgress,
+    examDaysRemaining,
     stateHash,
   };
 }
@@ -296,6 +323,10 @@ export async function computeNextAction(
     roundsThisMonth,
     startedToday,
     daysLeftInMonth,
+    gardenSummary,
+    gardenFeasible,
+    planProgress,
+    examDaysRemaining,
     stateHash,
   } = state;
 
@@ -357,12 +388,16 @@ export async function computeNextAction(
       return { action, targetSubject: w.subject, reason: `${w.subject}が残り${w.currentWrong}問です`, href: href(action, w.subject) };
     }
     if (underPracticedSubjects.length > 0) {
-      const subject = underPracticedSubjects[0];
+      // 未挑戦・データ不足・苦手・実戦模試弱点のいずれも無く、単に全体的な母数を
+      // 増やしたいだけの局面。ここで特定1科目の科目別演習を勧めると、その科目の
+      // 未出題ストック(questionSupply.tsのSTOCK_TARGET=5)をすぐ食い潰してしまい、
+      // ライブ生成待ち(20〜60秒)を連発させてユーザーを待たせる。全科目演習なら
+      // 18科目に負荷が分散し、どこかしらに在庫がある確率が高いため待たせにくい。
       return {
-        action: "subject",
-        targetSubject: subject,
-        reason: `${subject}は他科目より問題数が少なめです`,
-        href: href("subject", subject),
+        action: "mock",
+        targetSubject: null,
+        reason: `演習量が少なめの科目が${underPracticedSubjects.length}件、全体を底上げしましょう`,
+        href: href("mock", null),
       };
     }
     if (examFeasible) {
@@ -376,19 +411,46 @@ export async function computeNextAction(
     "- review: 復習モード（対象科目を1つ指定。過去に間違えて、まだ克服できていない問題だけを解き直す）",
     "- mock: 全科目演習（全科目を1問ずつ横断。手薄な科目を広く埋める・ストックを増やす）",
     examFeasible ? "- exam: 実戦模試（本番同形式・未出題の問題だけで力試し）" : null,
+    gardenFeasible ? "- garden: 記憶の庭（克服済みだが1カ月以上前に克服した、忘れかけている問題の再テスト）" : null,
   ]
     .filter(Boolean)
     .join("\n");
 
+  const planLines =
+    planProgress && planProgress.planTotal > 0
+      ? planProgress.bySubject
+          .slice(0, 8)
+          .map((s) => `${s.subject}(${s.done}/${s.target}問)`)
+          .join("、")
+      : null;
+
   const prompt = `あなたは精神保健福祉士国家試験対策アプリの学習コーチです。
-合格条件は「総得点60%以上」かつ「科目群①〜⑨のすべてで1問以上正解」で、
-0点の科目群が1つでもあれば総得点に関係なく不合格になります。
+${EXAM_ROUND_LABEL}本番（あと${examDaysRemaining}日）に向け、合格条件から逆算して合格率を最大化する
+学習手順を常に考えてください。合格条件は「総得点60%以上」かつ「科目群①〜⑨のすべてで
+1問以上正解」で、0点の科目群が1つでもあれば総得点に関係なく不合格になります。
 
 以下のユーザーの現在の学習状況から、次に取るべき行動を1つだけ選び、
 40字以内の短い理由とともに提示してください。理由には状況を表す具体的な数字を1つ含めてください。
 
+# 最重要ルール: subject（科目別演習）を選んでよいのは、具体的に特定できた弱点
+（苦手科目群・実戦模試での失点・間違えたまま残っている問題）に対処する場合だけです。
+「まだ判断材料が少ない」「未挑戦の科目が多い」「全体的に演習量を底上げしたい」という、
+まだ何も具体的な弱点が見つかっていない理由でsubjectを選んではいけません。理由: 1科目の
+未出題ストックは常時5問程度しか無く、同じ科目へ演習を集中させるとすぐにストックを
+使い切ってその場のライブ生成待ち（20〜60秒）が連発し、ユーザーを待たせてしまいます。
+「母数を増やしたい」「まだよくわからない」が理由になる場合は、必ずmock（全科目演習）を
+選んでください。mockは18科目に1問ずつ出題が分散するため、どこかしらの科目に在庫がある
+確率が高く、ユーザーを待たせずに母数を増やせます。
+
 # 選べる行動（このリストにあるものだけから選ぶこと）
 ${feasibleActionsText}
+${gardenSummary.eligibleCount < GARDEN_MIN_ELIGIBLE ? `- 記憶の庭は対象問題が${gardenSummary.eligibleCount}/${GARDEN_MIN_ELIGIBLE}問のため今はまだ選べません（候補に入れないでください）` : ""}
+
+# 今月の学習プラン（振り返りレポートが算出した、合格から逆算した今月の数値目標。現在の消化状況）
+${planLines ? `${planLines}（進捗 ${planProgress?.doneTotal ?? 0}/${planProgress?.planTotal ?? 0}問）` : "まだ発行されていません"}
+このプランを基本の軸としつつ、より緊急の具体的な弱点シグナル（苦手科目群・実戦模試の弱点など）が
+下記に出ている場合や、実際の進捗がプランから大きく外れている場合は、プランに固執せずその場の
+シグナルを優先して構いません。
 
 # 現在の状況
 - 全${stockSnapshot.length}科目中、まだ一度も演習していない科目: ${untouchedSubjects.length}科目${untouchedSubjects.length > 0 ? `（${untouchedSubjects.slice(0, 6).join("、")}）` : ""}
@@ -411,14 +473,21 @@ ${feasibleActionsText}
   対応済みでも、実戦模試での弱点科目が残っていれば優先的に科目別演習を勧めてください
 - 判定材料は十分(${CONFIDENCE_THRESHOLD}問以上)だが、他の科目に比べて問題数が相対的に
   少ない科目: ${underPracticedSubjects.length > 0 ? underPracticedSubjects.slice(0, 5).join("、") : "無し"}
-  （未挑戦・データ不足・苦手科目・実戦模試での弱点のいずれも無い場合、この中から1科目を
-  選んでバランスよく演習量を底上げする提案をしてください）
+  （未挑戦・データ不足・苦手科目・実戦模試での弱点のいずれも無く、単に全体の母数を
+  増やしたいだけの場合はmockを提案してください。特定1科目だけの科目別演習を連続で
+  勧めると、その科目の未出題ストックをすぐ使い切りライブ生成待ちが発生しやすいため、
+  「母数を増やす」目的の時はsubjectではなくmockを優先してください）
 - 前回の実戦模試: ${lastExamText}
 - 実戦模試: ${examFeasible ? `受験可能（今月すでに${roundsThisMonth}回受験、残り${remainingThisMonth}回。今月はあと${daysLeftInMonth}日）` : startedToday ? "今日は既に新しい回を開始済み（1日1回まで。明日また受験可能）" : "現在は受験不可（問題ストック準備中、または今月の受験上限に到達）"}
 - 実戦模試は月5回までの限られた回数です。早い者勝ちで消費してよいものではなく、弱点克服が
   ある程度進んだ節目ごとに計画的に受けるのが望ましいペースです。今月すでに何度も受験している、
   もしくは前回受験からまだ日が浅い場合は、残り回数があっても演習（科目別演習・全科目演習）を
-  優先し、実戦模試は勧めないでください`;
+  優先し、実戦模試は勧めないでください
+- 記憶の庭（克服済みだが1カ月以上前に克服し忘れかけている問題の再テスト）: ${
+    gardenFeasible
+      ? `対象${gardenSummary.eligibleCount}問、前回実施は${gardenSummary.lastPlayedAt ? new Date(gardenSummary.lastPlayedAt).toLocaleDateString("ja-JP") : "未実施"}。合否に直結する優先度は高くないので、他に優先すべき苦手が無く久しく実施していない場合の選択肢としてください`
+      : `対象${gardenSummary.eligibleCount}/${GARDEN_MIN_ELIGIBLE}問でまだ選べません`
+  }`;
 
   try {
     const llm = await getLlmSettings();
@@ -427,6 +496,7 @@ ${feasibleActionsText}
     await logUsage({ source: "next-action", provider: llm.provider, model: llm.model, usage });
 
     if (object.action === "exam" && !examFeasible) return { ...fallback(), stateHash };
+    if (object.action === "garden" && !gardenFeasible) return { ...fallback(), stateHash };
     if (object.action === "subject" || object.action === "review") {
       if (!object.targetSubject || !knownSubjects.has(object.targetSubject)) return { ...fallback(), stateHash };
       return {

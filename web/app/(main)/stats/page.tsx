@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { getStoredProfile, type UserProfile } from "@/lib/profile";
 import GuardianView from "./GuardianView";
+import ReportListSection from "../reports/ReportListSection";
 
 type Summary = {
   thisMonth: string;
@@ -101,19 +102,24 @@ export default function StatsPage() {
 
   if (error) return <p className="rounded bg-red-100 p-3 text-sm text-red-700">{error}</p>;
   if (!summary) return null;
+  const reportProfile = (profile === "test" ? "test" : "self") as "self" | "test";
+
   if (summary.subjectsPracticed === 0)
     return (
-      <div className="space-y-3">
-        <p className="text-stone-600">
-          ここには実戦模試（本番と同じ形式・時間制限・一度も出題されていない問題だけで構成される模試）の
-          結果だけが表示されます。まだ実戦模試を受けていないので、成績はまだありません。
-        </p>
-        <Link
-          href="/full-mock"
-          className="inline-flex min-h-12 items-center rounded-xl bg-indigo-600 px-5 py-3 font-medium text-white transition-colors hover:bg-indigo-700"
-        >
-          実戦模試を受けてみる
-        </Link>
+      <div className="space-y-6">
+        <div className="space-y-3">
+          <p className="text-stone-600">
+            ここには実戦模試（本番と同じ形式・時間制限・一度も出題されていない問題だけで構成される模試）の
+            結果だけが表示されます。まだ実戦模試を受けていないので、成績はまだありません。
+          </p>
+          <Link
+            href="/full-mock"
+            className="inline-flex min-h-12 items-center rounded-xl bg-indigo-600 px-5 py-3 font-medium text-white transition-colors hover:bg-indigo-700"
+          >
+            実戦模試を受けてみる
+          </Link>
+        </div>
+        <ReportListSection profile={reportProfile} />
       </div>
     );
 
@@ -350,6 +356,8 @@ export default function StatsPage() {
       <p className="text-xs text-stone-400">
         取り組んだ科目（全期間）: {summary.subjectsPracticed} / {summary.totalSubjects}
       </p>
+
+      <ReportListSection profile={reportProfile} />
     </div>
   );
 }

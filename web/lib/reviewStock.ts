@@ -7,7 +7,21 @@ export type WrongStockEntry = { subject: string; missCount: number };
 // 連続カウントは振り出しに戻り、即座にストックへ戻る）。
 const REQUIRED_STREAK = 3;
 
-type QuestionStat = { subject: string; missCount: number; trailingCorrect: number };
+// 記憶の庭（克服済みだが忘れかけている問題の再出題）関連の定数。
+// 克服してからこの日数以上経過した問題だけが対象になる（忘却曲線を踏まえ、
+// ある程度時間が経ってから記憶の定着を確認する）。
+export const GARDEN_OVERCOME_MIN_DAYS = 30;
+// 対象問題がこの件数に満たない場合はUIでグレーアウトする（毎回同じ数問を
+// 繰り返し出題するだけになってしまうのを避けるための最低ライン）。
+export const GARDEN_MIN_ELIGIBLE = 30;
+
+type QuestionStat = {
+  subject: string;
+  missCount: number;
+  trailingCorrect: number;
+  /** 3回連続正解を達成した瞬間のanswered_at。現在克服済み(trailingCorrect>=REQUIRED_STREAK)の場合のみ値を持つ。 */
+  overcomeAt: string | null;
+};
 
 async function computeQuestionStats(profile: string): Promise<Map<number, QuestionStat>> {
   const sb = supabase();
@@ -18,25 +32,31 @@ async function computeQuestionStats(profile: string): Promise<Map<number, Questi
     .order("answered_at", { ascending: true });
   if (error) throw new Error(error.message);
 
-  type Row = { question_id: number; is_correct: boolean; questions: { subject: string } | null };
-  const byQuestion = new Map<number, { subject: string; history: boolean[] }>();
+  type Row = { question_id: number; is_correct: boolean; answered_at: string; questions: { subject: string } | null };
+  const byQuestion = new Map<number, { subject: string; history: { is_correct: boolean; answered_at: string }[] }>();
   for (const a of (attempts ?? []) as unknown as Row[]) {
     const subject = a.questions?.subject;
     if (!subject) continue;
     const entry = byQuestion.get(a.question_id) ?? { subject, history: [] };
-    entry.history.push(a.is_correct);
+    entry.history.push({ is_correct: a.is_correct, answered_at: a.answered_at });
     byQuestion.set(a.question_id, entry);
   }
 
   const stats = new Map<number, QuestionStat>();
   for (const [questionId, { subject, history }] of byQuestion) {
-    const missCount = history.filter((ok) => !ok).length;
+    const missCount = history.filter((h) => !h.is_correct).length;
     let trailingCorrect = 0;
     for (let i = history.length - 1; i >= 0; i--) {
-      if (history[i]) trailingCorrect++;
+      if (history[i].is_correct) trailingCorrect++;
       else break;
     }
-    stats.set(questionId, { subject, missCount, trailingCorrect });
+    // 克服の瞬間 = 直近の連続正解ランの中で、REQUIRED_STREAK個目の正解がついた時点
+    // （それ以降さらに正解が続いていても、克服そのものはその時点で成立している）。
+    const overcomeAt =
+      trailingCorrect >= REQUIRED_STREAK
+        ? history[history.length - trailingCorrect + REQUIRED_STREAK - 1].answered_at
+        : null;
+    stats.set(questionId, { subject, missCount, trailingCorrect, overcomeAt });
   }
   return stats;
 }
@@ -91,4 +111,42 @@ export async function getWrongStockProgressBySubject(
     bySubject.set(subject, entry);
   }
   return bySubject;
+}
+
+export type GardenEntry = { subject: string; missCount: number; overcomeAt: string; daysSinceOvercome: number };
+
+/**
+ * 記憶の庭（克服済みだが忘れかけている問題）の対象一覧。「今も克服済み
+ * (trailingCorrect>=REQUIRED_STREAK)」かつ「克服してからGARDEN_OVERCOME_MIN_DAYS日以上
+ * 経過」した問題を返す。記憶の庭で誤答すればtrailingCorrectがリセットされ弱点ストックに
+ * 戻る（＝この一覧からも自動的に外れる）ため、克服状態を保つための追加のカラムや
+ * 状態管理は不要 ── computeQuestionStats の履歴走査だけで完結する。
+ */
+export async function computeGardenEligible(profile: string): Promise<Map<number, GardenEntry>> {
+  const stats = await computeQuestionStats(profile);
+  const now = Date.now();
+  const result = new Map<number, GardenEntry>();
+  for (const [questionId, { subject, missCount, trailingCorrect, overcomeAt }] of stats) {
+    if (trailingCorrect < REQUIRED_STREAK || !overcomeAt) continue;
+    const daysSinceOvercome = Math.floor((now - new Date(overcomeAt).getTime()) / 86_400_000);
+    if (daysSinceOvercome < GARDEN_OVERCOME_MIN_DAYS) continue;
+    result.set(questionId, { subject, missCount, overcomeAt, daysSinceOvercome });
+  }
+  return result;
+}
+
+/** 記憶の庭の選択画面用。対象件数と前回実施日（mode='garden'の最新answered_at）。 */
+export async function getGardenSummary(profile: string): Promise<{ eligibleCount: number; lastPlayedAt: string | null }> {
+  const [eligible, { data: lastRow }] = await Promise.all([
+    computeGardenEligible(profile),
+    supabase()
+      .from("attempts")
+      .select("answered_at")
+      .eq("profile", profile)
+      .eq("mode", "garden")
+      .order("answered_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  return { eligibleCount: eligible.size, lastPlayedAt: (lastRow?.answered_at as string | undefined) ?? null };
 }

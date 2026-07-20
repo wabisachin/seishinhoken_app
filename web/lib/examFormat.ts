@@ -44,6 +44,18 @@ export const EXAM_SUBJECT_GROUPS: { label: string; subjects: string[] }[] = [
 ];
 
 export const EXAM_PASS_SCORE_RATE = 0.6;
+
+// 次回の本試験（第29回・令和9年）。おすすめの次の一手・月次学習プランの「逆算」の
+// 基準点として使う。年が明けたら次回の試験情報に更新すること。
+export const EXAM_ROUND_LABEL = "第29回";
+export const EXAM_DATE_START = "2027-02-06";
+export const EXAM_DATE_END = "2027-02-07";
+
+/** 本番初日までの残り日数（0未満にはしない）。 */
+export function daysUntilExam(now: Date = new Date()): number {
+  return Math.max(0, Math.ceil((new Date(EXAM_DATE_START).getTime() - now.getTime()) / 86_400_000));
+}
+
 // 実戦模試ストックとして常時確保しておく「回」数（1回=共通84問+専門48問ぶん）。
 // 月次上限(EXAM_MONTHLY_LIMIT)とは別の値 ── こちらは裏側の在庫バッファの厚みで、
 // 大きいほど初回ビルドアップが長くかかるだけなので、月の上限と一致させる必要は無い。
