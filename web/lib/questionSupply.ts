@@ -71,14 +71,20 @@ async function fetchUnseenActive(
 }
 
 /**
- * 新規生成もせず、今回のセッションで未出題の問題も無くなった場合の再出題用。
- * 「上限に達した＝新規が出ないだけで、既出の問題が出るだけ」という仕様を守るため、
- * セッション内の除外は無視してプールから選ぶ。出題回数（attempts数）が最も少ない
- * 問題を優先し、同率の場合はランダムに選ぶ（特定の1問ばかり繰り返さないため）。
+ * 既出（本人が一度以上解答済み）の問題からの再出題用。出題回数（attempts数）が最も
+ * 少ない問題を優先し、同率の場合はランダムに選ぶ（特定の1問ばかり繰り返さないため）。
+ * excludeIdsは今回のセッションで既に出した問題のIDで、候補が余っている限りは
+ * 同じセッション内での即座の再登場を避ける（候補が無くなったら除外を無視して選び直す。
+ * 1問しか既出が無い場合にnullを返して出題不能にしてしまわないため）。
  * null になるのは、その科目にactiveな問題が1問も無い場合のみ
  * （＝本当の意味での「出題できる問題が無い」状態）。
  */
-async function fetchLeastAttempted(subject: string, profile: string, caseAxis?: CaseAxis): Promise<Question | null> {
+async function fetchLeastAttempted(
+  subject: string,
+  profile: string,
+  caseAxis?: CaseAxis,
+  excludeIds: number[] = [],
+): Promise<Question | null> {
   let query = supabase()
     .from("questions")
     .select(QUESTION_COLS)
@@ -89,8 +95,11 @@ async function fetchLeastAttempted(subject: string, profile: string, caseAxis?: 
   if (caseAxis === "case") query = query.not("case_text", "is", null);
   if (caseAxis === "nocase") query = query.is("case_text", null);
   const { data: active } = await query;
-  const rows = (active ?? []) as Question[];
+  let rows = (active ?? []) as Question[];
   if (rows.length === 0) return null;
+
+  const withoutExcluded = rows.filter((r) => !excludeIds.includes(r.id));
+  if (withoutExcluded.length > 0) rows = withoutExcluded;
 
   const ids = rows.map((r) => r.id);
   // パーティション不変条件（1問は必ず1つのprofileにしか属さない）上は冗長だが、
@@ -156,12 +165,13 @@ async function countUnservedActive(subject: string, profile: string, caseAxis?: 
 const topUpInFlight = new Set<string>();
 
 /**
- * 指定科目の「未出題ストック」がSTOCK_TARGET未満なら生成して埋める。新規生成の確率は
- * (SUBJECT_TARGET - activeCount) / SUBJECT_TARGET で、0問なら100%、100問で50%、
- * 150問で25%、200問(SUBJECT_TARGET)で0%と、アクティブ数に応じて線形に下がっていく
- * （新規率を下げる分、既出問題の再出題で埋め合わせる）。確率で「今回は生成しない」が
- * 選ばれた場合、ストックが5に届いていなくても無理に埋めようとせず、そのまま打ち切る
- * （却下含め生成に失敗し続ける場合も同様に打ち切る。TOPUP_BATCH_CAPが上限）。
+ * 指定科目の「未出題ストック」がSTOCK_TARGET未満なら、上限に達するまで無条件に生成して埋める。
+ * 新規問題を出題するかどうかのテーパー確率（(SUBJECT_TARGET - activeCount) / SUBJECT_TARGET）は
+ * ここではなく、実際にユーザーへ出題する側のgetOrGenerateNextだけが持つ。この関数の役割は
+ * あくまで「新規が選ばれた時に即座に出せるよう、未出題ストックを常に満タンにしておく」こと
+ * だけであり、テーパーによる新規率の抑制と二重に効かせると、新規が選ばれたのにストックが
+ * 切れていてライブ生成待ちが増える、という本末転倒が起きるため（却下含め生成に失敗し
+ * 続ける場合はTOPUP_BATCH_CAPで打ち切る）。
  *
  * 1日1回のCron（`/api/cron/topup`）と、出題直後のバックグラウンドフック
  * （`/api/quiz/next`、Next.jsの`after()`で非ブロッキング実行）の両方から呼ばれる。
@@ -186,7 +196,7 @@ export async function topUpSubject(
   const start = Date.now();
   try {
     // 本人・動作テスト用はそれぞれ独立したプールとしてストックを補充する
-    // （50/200テーパーの上限もプールごとに別々に判定する）。
+    // （SUBJECT_TARGET/HARD_CAP_TOTALの上限もプールごとに別々に判定する）。
     const unservedBefore = await countUnservedActive(subject, profile);
     let unserved = unservedBefore;
     let generated = 0;
@@ -194,9 +204,6 @@ export async function topUpSubject(
       const totalCount = await countBySubject(subject, ["active", "rejected"], "general", profile);
       const activeCount = await countBySubject(subject, ["active"], "general", profile);
       if (totalCount >= HARD_CAP_TOTAL || activeCount >= SUBJECT_TARGET) break;
-
-      const newProbability = Math.max(0, (SUBJECT_TARGET - activeCount) / SUBJECT_TARGET);
-      if (Math.random() >= newProbability) break;
 
       try {
         const result = await generateOneQuestion(subject, profile);
@@ -345,8 +352,8 @@ const axisTopUpInFlight = new Set<string>();
  * generateOneQuestion(subject, { forceCaseAxis })で狙い撃ちで埋める。科目によっては
  * 実績比率上どちらかの軸がほぼ出ない（例:「精神医学と精神医療」はcase比率がほぼ0%）ため、
  * 通常のtopUpSubject（形式を問わない確率抽選）任せではこの軸のストックがいつまでも
- * 貯まらない。そのため専用に軸を固定して生成する。50/200テーパーの上限
- * （HARD_CAP_TOTAL/SUBJECT_TARGET）はtopUpSubjectと共有する。
+ * 貯まらない。そのため専用に軸を固定して生成する。生成上限（HARD_CAP_TOTAL/SUBJECT_TARGET）は
+ * topUpSubjectと共有する。
  */
 export async function topUpCaseAxisStock(
   subject: string,
@@ -427,8 +434,8 @@ const examTopUpInFlight = new Set<string>();
 
 /**
  * 実戦模試プールを「科目ごとの本番出題数 × EXAM_STOCK_SESSIONS_AHEAD」まで埋める。
- * 通常プールの50/200テーパー（コスト逓減ポリシー）は適用しない ── 実戦模試は
- * 月5回という需要が明確なので、単純に目標件数までひたすら埋めるだけでよい。
+ * 通常プール(getOrGenerateNext)の新規率テーパーは出題側だけの仕組みで、ここには
+ * 関係しない ── 実戦模試は月5回という需要が明確なので、単純に目標件数までひたすら埋めるだけでよい。
  * 却下が続いても諦めずに時間予算いっぱいまで試行する（topUpSubjectと同じ考え方）。
  */
 export async function topUpExamPool(profile: string, opts: { timeBudgetMs?: number } = {}): Promise<{ generated: number }> {
@@ -548,7 +555,42 @@ export type NextQuestionResult = {
 };
 
 /**
+ * generateOneQuestionを1回だけ試み、採用(active)されればその問題を返す。却下された場合は
+ * nullを返す（呼び出し側が「まだ試行の余地があるか」を判断してリトライ or フォールバックする）。
+ * generateOneQuestion自体が投げる例外（キー不正・課金上限・レート制限等）はここでは握り
+ * つぶさず、呼び出し元へそのまま伝播させる（「却下」と違い、無言でポーリングを続けさせる
+ * べきではないため）。ただし後から管理画面や開発者が原因を追えるよう、伝播させる前に
+ * ログとして残しておく。
+ */
+async function attemptLiveGeneration(subject: string, profile: string, caseAxis: CaseAxis | undefined): Promise<Question | null> {
+  let result;
+  try {
+    result = await generateOneQuestion(subject, profile, caseAxis ? { forceCaseAxis: caseAxis } : {});
+  } catch (e) {
+    await logError("generation", e, { subject });
+    throw e;
+  }
+  if (result.status === "active" && result.questionId) {
+    const fresh = await fetchQuestionById(result.questionId);
+    if (fresh) return fresh;
+  }
+  return null;
+}
+
+/**
  * 科目別演習の「次の1問」を返す。
+ *
+ * 新規(本人が一度も解答していない)問題を出すか、既出（過去に解答済み）の問題を再出題するかは
+ * newProbability = (SUBJECT_TARGET - activeCount) / SUBJECT_TARGET の確率で毎回抽選する
+ * （0問なら100%新規、100問で50%、150問で25%、200問(SUBJECT_TARGET)で0%と線形に下がる）。
+ * プールが育つにつれ、常に完全新規を出し続けるのではなく、既出問題への自然な再接触を
+ * 少しずつ混ぜていく（復習モード・記憶の庭とは別に、科目別演習自体の中でも反復に触れる
+ * 機会を作るための設計）。抽選した側に候補が無い場合（新規側が空、または既出側がまだ
+ * 1問も無い＝本当に何も解いていない科目）は、もう一方の側にフォールバックする。
+ *
+ * 未出題ストックの確保自体はtopUpSubject（かんばん方式の裏側の補充）の責務であり、
+ * この関数はそれを消費するだけ。その場ライブ生成（ユーザーを待たせる）は、新規側が
+ * 選ばれたのにストックが尽きている場合の最終手段としてのみ行う。
  *
  * 設計方針（コスト安全性が最優先）:
  * - バックグラウンドで生成し続けるループは持たない。生成は必ずこの関数の
@@ -572,49 +614,38 @@ export async function getOrGenerateNext(
   profile: string,
   caseAxis?: CaseAxis,
 ): Promise<NextQuestionResult> {
-  const existing = await fetchUnseenActive(subject, excludeIds, profile, caseAxis);
-
-  // かんばん方式のストック（topUpSubject/topUpCaseAxisStock、cron + /api/quiz/nextの
-  // 出題直後フック）が常時ストックを補充しているため、ここ（ユーザーへの出題そのもの）
-  // では既存の未出題問題があれば必ずそれを即座に返す。その場ライブ生成（ユーザーを
-  // 待たせる）は、本当にストックが尽きている場合の最終手段としてのみ行う。
   const activeCount = await countBySubject(subject, ["active"], "general", profile);
   const totalCount = await countBySubject(subject, ["active", "rejected"], "general", profile);
   const canGenerate = totalCount < HARD_CAP_TOTAL && activeCount < SUBJECT_TARGET;
-  const shouldGenerate = canGenerate && !existing;
+  const newProbability = Math.max(0, (SUBJECT_TARGET - activeCount) / SUBJECT_TARGET);
+  const preferNew = Math.random() < newProbability;
 
-  if (!shouldGenerate) {
+  async function tryNew(): Promise<NextQuestionResult | null> {
+    const existing = await fetchUnseenActive(subject, excludeIds, profile, caseAxis);
     if (existing) return { question: existing, exhausted: false };
-    // 今回のセッションで未出題の問題は無いが、新規も生成しない（上限 or 確率で見送り）
-    // 場合。「上限に達したら新規が出ないだけで既出の問題が出る」という仕様を守るため、
-    // セッション内の除外を無視してプールから再出題する。nullになるのはactiveが1問も無い時だけ。
-    const repeat = await fetchLeastAttempted(subject, profile, caseAxis);
-    return { question: repeat, exhausted: !repeat };
+    if (!canGenerate) return null;
+    const fresh = await attemptLiveGeneration(subject, profile, caseAxis);
+    if (fresh) return { question: fresh, exhausted: false };
+    // 却下された場合、直後に別経路で未出題が増えていないか念のため再確認してから、
+    // まだ生成の余地があるかどうかで「クライアントにリトライさせる」か諦めるかを決める。
+    const unseenAfterReject = await fetchUnseenActive(subject, excludeIds, profile, caseAxis);
+    if (unseenAfterReject) return { question: unseenAfterReject, exhausted: false };
+    const stillCanGenerate = (await countBySubject(subject, ["active", "rejected"], "general", profile)) < HARD_CAP_TOTAL;
+    // まだ試行の余地がある（クライアントがリトライすれば良い）ので、ここではexhausted扱いにしない
+    if (stillCanGenerate) return { question: null, exhausted: false };
+    return null;
   }
 
-  // generateOneQuestionは例外を投げることがある（キー不正・課金上限・レート制限等）。
-  // ここでは握りつぶさず呼び出し元に伝播させ、フロント側で即座にエラー表示させる
-  // （「却下」と違い、無言でポーリングを続けさせるべきではないため）。ただし後から
-  // 管理画面や開発者が原因を追えるよう、伝播させる前にログとして残しておく。
-  let result;
-  try {
-    result = await generateOneQuestion(subject, profile, caseAxis ? { forceCaseAxis: caseAxis } : {});
-  } catch (e) {
-    await logError("generation", e, { subject });
-    throw e;
+  async function tryExisting(): Promise<NextQuestionResult | null> {
+    const repeat = await fetchLeastAttempted(subject, profile, caseAxis, excludeIds);
+    if (repeat) return { question: repeat, exhausted: false };
+    return null;
   }
-  if (result.status === "active" && result.questionId) {
-    const fresh = await fetchQuestionById(result.questionId);
-    if (fresh) return { question: fresh, exhausted: false };
-  }
-  // 却下された場合は、代わりに出せる既存問題があればそれを返す
-  const unseenFallback = existing ?? (await fetchUnseenActive(subject, excludeIds, profile, caseAxis));
-  const stillCanGenerate = (await countBySubject(subject, ["active", "rejected"], "general", profile)) < HARD_CAP_TOTAL;
-  if (unseenFallback || stillCanGenerate) {
-    // まだ試行の余地がある（クライアントがリトライすれば良い）ので、ここではexhausted扱いにしない
-    return { question: unseenFallback, exhausted: false };
-  }
-  // これ以上生成もできず、未出題の問題も無い。それでも既出のactiveが1問でもあれば再出題する
-  const repeat = await fetchLeastAttempted(subject, profile, caseAxis);
-  return { question: repeat, exhausted: !repeat };
+
+  const primary = preferNew ? await tryNew() : await tryExisting();
+  if (primary) return primary;
+  const fallback = preferNew ? await tryExisting() : await tryNew();
+  if (fallback) return fallback;
+  // 新規側・既出側どちらにも候補が無い（＝この科目にactiveな問題が1問も無い）
+  return { question: null, exhausted: true };
 }
