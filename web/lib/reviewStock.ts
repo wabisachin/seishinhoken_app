@@ -97,6 +97,22 @@ export async function getWrongStockProgress(profile: string): Promise<{ everMiss
   return { everMissed, currentWrong };
 }
 
+/**
+ * 一度でも間違えたことがある問題のID一覧（現在克服済みかどうかは問わない。科目付き）。
+ * 月間プランの復習セット進捗判定用: 「今は克服済みで現在の弱点ストックには無いが、
+ * 今月中に正解して克服した」問題も復習の実績としてカウントしたいため、現在進行形の
+ * 弱点ストック(computeWrongStock)ではなく、全履歴を通じて一度でも間違えたことが
+ * あるかどうかで判定する。
+ */
+export async function getEverMissedQuestionIds(profile: string): Promise<Map<number, string>> {
+  const stats = await computeQuestionStats(profile);
+  const result = new Map<number, string>();
+  for (const [questionId, { subject, missCount }] of stats) {
+    if (missCount > 0) result.set(questionId, subject);
+  }
+  return result;
+}
+
 /** getWrongStockProgressの科目別版。復習モードの科目選択画面で「あと何問でクリアか」を科目ごとに出すために使う。 */
 export async function getWrongStockProgressBySubject(
   profile: string,

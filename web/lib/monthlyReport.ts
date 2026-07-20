@@ -442,8 +442,11 @@ function buildNarrativePrompt(args: {
 }): string {
   const { metrics, formatWeakness, plan, mistakeAnalysis, examDaysRemaining } = args;
   const planLines = plan.bySubject
-    .filter((s) => s.reviewTarget > 0 || s.practiceTarget > 0)
-    .map((s) => `- ${s.subject}: 復習${s.reviewTarget}問・演習${s.practiceTarget}問（優先度${s.priorityRank}）`)
+    .filter((s) => s.reviewSets > 0 || s.practiceSets > 0)
+    .map(
+      (s) =>
+        `- ${s.subject}: 復習${s.reviewSets * plan.setSize}問・演習${s.practiceSets * plan.setSize}問`,
+    )
     .join("\n");
 
   return `あなたは精神保健福祉士国家試験対策アプリの「学習メンター」です。ユーザーの良かった面を具体的に褒めながら、前向きに、かつ実践的で価値の高い情報を伝える月次振り返りレポートの文章を書いてください。本番（第29回・令和9年2/6-2/7）まで残り${examDaysRemaining}日です。
@@ -479,8 +482,10 @@ ${
 # 誤答パターン分析（別のLLMが実施した結果）
 ${JSON.stringify(mistakeAnalysis)}
 
-# 次月の学習プラン（コード側で算出済みの数値。これ自体は変更せず、意味づけの文章だけを書くこと）
+# 次月の学習プラン（数値は別のLLM呼び出しが先月の状況から配分を決め、コード側で確定させたもの。
+# これ自体は変更せず、意味づけの文章だけを書くこと）
 ${planLines || "（対象科目無し。順調です）"}
+配分を決めたLLMの考え方: ${plan.allocationRationale}
 
 上記を踏まえ、前向きな導入・良かった点・弱点の噛み砕いた説明・重点科目（科目名の列挙＋全体理由1つ）・
 プランの意味づけを書いてください。`;

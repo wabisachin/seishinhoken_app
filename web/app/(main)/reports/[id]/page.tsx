@@ -39,8 +39,15 @@ type MistakeAnalysis = {
   fundamentalIssues: { label: string; evidence: string; supportingQuestionIds: number[] }[];
   formatWeakness: FormatWeakness;
 };
-type SubjectPlanEntry = { subject: string; reviewTarget: number; practiceTarget: number; priorityRank: 1 | 2 | 3 };
-type MonthlyPlan = { bySubject: SubjectPlanEntry[]; totalTarget: number; examDaysRemaining: number };
+type SubjectPlanEntry = { subject: string; reviewSets: number; practiceSets: number };
+type MonthlyPlan = {
+  bySubject: SubjectPlanEntry[];
+  setSize: number;
+  totalSets: number;
+  totalTarget: number;
+  allocationRationale: string;
+  examDaysRemaining: number;
+};
 type Narrative = {
   greeting: string;
   highlights: string[];
@@ -256,21 +263,6 @@ function ReportDetailInner() {
           </div>
         )}
 
-        {metrics.byMinorWrong.length > 0 && (
-          <div className="mt-4">
-            <p className="mb-1.5 text-xs font-bold text-stone-500">誤答が多い小単元（今月）</p>
-            <ul className="space-y-1 text-sm text-stone-700">
-              {metrics.byMinorWrong.slice(0, 8).map((m, i) => (
-                <li key={i} className="flex justify-between gap-2">
-                  <span className="truncate">
-                    {m.subject} / {m.minor}
-                  </span>
-                  <span className="shrink-0 font-medium text-red-600">{m.wrongCount}問</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
       </section>
 
       {narrative.focusAreas.length > 0 && (
@@ -292,20 +284,24 @@ function ReportDetailInner() {
       <section className="rounded-2xl bg-white p-5 shadow-warm">
         <h2 className="mb-2 font-bold text-indigo-700">次月の学習プラン</h2>
         <p className="mb-3 text-sm leading-relaxed text-stone-700">{narrative.planNarration}</p>
-        {plan.bySubject.filter((s) => s.reviewTarget + s.practiceTarget > 0).length > 0 && (
+        {plan.bySubject.filter((s) => s.reviewSets + s.practiceSets > 0).length > 0 && (
           <div className="space-y-1.5">
             {plan.bySubject
-              .filter((s) => s.reviewTarget + s.practiceTarget > 0)
-              .map((s) => (
-                <div key={s.subject} className="flex items-center justify-between gap-2 rounded-lg bg-stone-50 p-2 text-sm">
-                  <span className="truncate text-stone-700">{s.subject}</span>
-                  <span className="shrink-0 text-stone-500">
-                    {s.reviewTarget > 0 && `復習${s.reviewTarget}問`}
-                    {s.reviewTarget > 0 && s.practiceTarget > 0 && " / "}
-                    {s.practiceTarget > 0 && `演習${s.practiceTarget}問`}
-                  </span>
-                </div>
-              ))}
+              .filter((s) => s.reviewSets + s.practiceSets > 0)
+              .map((s) => {
+                const reviewQuestions = s.reviewSets * plan.setSize;
+                const practiceQuestions = s.practiceSets * plan.setSize;
+                return (
+                  <div key={s.subject} className="flex items-center justify-between gap-2 rounded-lg bg-stone-50 p-2 text-sm">
+                    <span className="truncate text-stone-700">{s.subject}</span>
+                    <span className="shrink-0 text-stone-500">
+                      {reviewQuestions > 0 && `復習${reviewQuestions}問`}
+                      {reviewQuestions > 0 && practiceQuestions > 0 && " / "}
+                      {practiceQuestions > 0 && `演習${practiceQuestions}問`}
+                    </span>
+                  </div>
+                );
+              })}
           </div>
         )}
         <p className="mt-3 text-xs text-stone-400">本番まであと{plan.examDaysRemaining}日</p>

@@ -581,9 +581,11 @@ async function attemptLiveGeneration(subject: string, profile: string, caseAxis:
  * 科目別演習の「次の1問」を返す。
  *
  * 新規(本人が一度も解答していない)問題を出すか、既出（過去に解答済み）の問題を再出題するかは
- * newProbability = (SUBJECT_TARGET - activeCount) / SUBJECT_TARGET の確率で毎回抽選する
- * （0問なら100%新規、100問で50%、150問で25%、200問(SUBJECT_TARGET)で0%と線形に下がる）。
- * プールが育つにつれ、常に完全新規を出し続けるのではなく、既出問題への自然な再接触を
+ * newProbability = max(25%, (SUBJECT_TARGET - activeCount) / SUBJECT_TARGET) の確率で毎回
+ * 抽選する（0問なら100%新規、100問で50%、150問で25%、200問(SUBJECT_TARGET)以降は下限の
+ * 25%で頭打ちにする。下限が無いと1%未満まで下がり続け、プールが育ちきった後半にほぼ
+ * 新規に触れられなくなるため）。プールが育つにつれ、常に完全新規を出し続けるのではなく、
+ * 既出問題への自然な再接触を
  * 少しずつ混ぜていく（復習モード・記憶の庭とは別に、科目別演習自体の中でも反復に触れる
  * 機会を作るための設計）。抽選した側に候補が無い場合（新規側が空、または既出側がまだ
  * 1問も無い＝本当に何も解いていない科目）は、もう一方の側にフォールバックする。
@@ -617,7 +619,11 @@ export async function getOrGenerateNext(
   const activeCount = await countBySubject(subject, ["active"], "general", profile);
   const totalCount = await countBySubject(subject, ["active", "rejected"], "general", profile);
   const canGenerate = totalCount < HARD_CAP_TOTAL && activeCount < SUBJECT_TARGET;
-  const newProbability = Math.max(0, (SUBJECT_TARGET - activeCount) / SUBJECT_TARGET);
+  // (SUBJECT_TARGET - activeCount) / SUBJECT_TARGETだけだと200問に近づくにつれ1%未満まで
+  // 下がってしまい、後半ほぼ新規が出ない状態になる。25%を下限にして、プールが育ちきった
+  // 後も一定割合は新規に触れられるようにする。
+  const NEW_PROBABILITY_FLOOR = 0.25;
+  const newProbability = Math.max(NEW_PROBABILITY_FLOOR, (SUBJECT_TARGET - activeCount) / SUBJECT_TARGET);
   const preferNew = Math.random() < newProbability;
 
   async function tryNew(): Promise<NextQuestionResult | null> {

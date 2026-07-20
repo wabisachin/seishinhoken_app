@@ -35,6 +35,10 @@ const UNTOUCHED_THRESHOLD = 3;
 // ファイルを直接importできないため。review-summary APIの直近件数の窓RECENT_WINDOW=30
 // とも揃えている）
 const CONFIDENCE_THRESHOLD = 30;
+// 復習ストック（間違えたまま残っている問題）がこの問数以上溜まっている科目は、
+// たとえ全体の解答数が薄くても新規問題(subject)をこれ以上勧めない（ユーザー指示:
+// 復習が積み上がりすぎるとやる気を削ぐため、それ以上増やさず消化を優先させる）。
+const REVIEW_BACKLOG_SATURATION = 20;
 
 const NextActionSchema = z.object({
   action: z.enum(["subject", "review", "mock", "exam", "garden"]),
@@ -393,8 +397,10 @@ export async function computeNextAction(
     if (weakSubjects.length > 0) {
       const w = weakSubjects[0];
       // 解答数が薄い科目は、間違いが残っていても復習ではなく科目別演習を勧める
-      // （まだ見つかっていない弱点が多く残っている可能性が高いため）
-      const action = w.thin ? "subject" : "review";
+      // （まだ見つかっていない弱点が多く残っている可能性が高いため）。ただし復習ストックが
+      // 既にREVIEW_BACKLOG_SATURATION問以上溜まっている場合は、薄い科目であっても
+      // 新規問題をこれ以上増やさず、復習で消化することを優先する
+      const action = w.thin && w.currentWrong < REVIEW_BACKLOG_SATURATION ? "subject" : "review";
       return { action, targetSubject: w.subject, reason: `${w.subject}が残り${w.currentWrong}問です`, href: href(action, w.subject) };
     }
     if (underPracticedSubjects.length > 0) {
@@ -488,7 +494,11 @@ ${planLines ? `${planLines}（進捗 ${planProgress?.doneTotal ?? 0}/${planProgr
 - 苦手科目トップ3の対応方法: 問題数が「少」と付いている科目は、間違いが残っていても
   actionはreviewではなくsubjectにしてください（母数を増やしてまだ見つかっていない
   弱点を洗い出すことを優先すべきため）。「少」が付いていない科目はactionをreviewに
-  してください（問題数は十分なので、残っている間違いをそのまま復習で潰すべきため）
+  してください（問題数は十分なので、残っている間違いをそのまま復習で潰すべきため）。
+  ただし、「少」が付いている科目でも復習ストック（残り◯問）が既に${REVIEW_BACKLOG_SATURATION}問
+  以上溜まっている場合は例外で、actionはsubjectではなくreviewにしてください
+  （復習が積み上がりすぎるとユーザーのやる気を削ぐため、これ以上新規問題を増やさず
+  既存の復習ストックを消化することを優先する）
 - 問題数が少なく判断できない科目は、間違いの有無に関わらず未挑戦の科目と同列に最優先で
   扱ってください。まだ解いていない問題の中に見つかっていない弱点が隠れている可能性が
   高く、母数を増やすこと自体が優先課題です。苦手科目トップ3への対応は、判断できない

@@ -184,8 +184,11 @@ function WeaknessRow({ s, medianTotal }: { s: ReviewSubject; medianTotal: number
   // 誤判定され、詳細を見たいだけなのに演習が始まってしまう不具合の原因になっていた
   const linkContent = (
     <>
-      <span className="w-28 shrink-0 truncate text-sm text-stone-700 sm:w-36">{s.subject}</span>
-      <div className="h-2 flex-1 overflow-hidden rounded-full bg-stone-100">
+      {/* 科目名は可変長（短い「医学概論」〜長い「ソーシャルワークの理論と方法(専門)」まで）
+          なので、固定幅のtruncateにはせずflex-1で余白を優先的に割り当て、進捗バーは
+          あくまで補助的な装飾として小さめの固定幅にする（見切れて判別しづらくなるのを防ぐ） */}
+      <span className="min-w-0 flex-1 truncate text-sm text-stone-700">{s.subject}</span>
+      <div className="h-2 w-10 shrink-0 overflow-hidden rounded-full bg-stone-100 sm:w-16">
         <div className={`h-full rounded-full ${barColor}`} style={{ width: `${barPercent}%` }} />
       </div>
       {badge}
@@ -212,13 +215,13 @@ function WeaknessRow({ s, medianTotal }: { s: ReviewSubject; medianTotal: number
       {/* 詳細ボタン。以前は「解答数が薄い」の！マークと別に並んでいて紛らわしく
           誤タップも招いていたため1つに統合した。薄い場合は黄色で目立たせつつ、
           押すと詳細（解答数・克服数・薄いことの説明）が開く、という一貫した動作にする。
-          タップ判定を広めにとるため見た目より大きめのサイズにしている */}
+          見た目は小さくしつつ、タップ判定はpaddingで確保する（科目名の表示幅を優先するため） */}
       <button
         type="button"
         onClick={() => setShowDetail((v) => !v)}
         aria-label={thin ? "問題数が少ない科目の詳細を見る" : "詳細を見る"}
         title={thin ? "問題数がまだ少なく、まだ遭遇していない問題にも弱点が隠れている可能性があります" : undefined}
-        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full font-serif text-sm italic transition-colors ${
+        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full p-1 font-serif text-xs italic transition-colors ${
           thin ? "bg-amber-400 font-bold text-white hover:bg-amber-500" : "border border-stone-300 text-stone-400 hover:bg-stone-100"
         }`}
       >
@@ -527,8 +530,12 @@ export default function Dashboard() {
               <div className="mt-3 space-y-1.5">
                 {shown.map((s) => (
                   <div key={s.subject} className="flex items-center gap-2">
-                    <span className="w-28 shrink-0 truncate text-xs text-stone-600 sm:w-36">{s.subject}</span>
-                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-stone-100">
+                    {/* 科目別弱点マップの科目名表示（本ファイル内のWeaknessRow）と同じ
+                        「flex-1のtruncate＋バーは補助的な固定幅」の考え方に揃える
+                        （ダッシュボード内で科目名の文字サイズ・省略のされ方が場所によって
+                        違うと見た目がちぐはぐになるため） */}
+                    <span className="min-w-0 flex-1 truncate text-sm text-stone-600">{s.subject}</span>
+                    <div className="h-1.5 w-10 shrink-0 overflow-hidden rounded-full bg-stone-100 sm:w-16">
                       <div
                         className="h-full rounded-full bg-indigo-400"
                         style={{ width: `${Math.min(100, Math.round((100 * s.done) / s.target))}%` }}
