@@ -126,6 +126,31 @@ function stripLeadingOptionNumber(text: string, index1based: number): string {
   return stripped || text.trim();
 }
 
+/**
+ * LLMは正答を選択肢の先頭付近に書きがちな強いバイアスを持つ（実データで検証済み:
+ * 単一正答問題708問中333問(47%)が1番目に正答が集中しており、一様な20%から大きく
+ * 外れていた）。プロンプトで「位置をランダムにしてください」と指示しても、この種の
+ * 生成順序バイアスは信頼できないため、生成後にプログラム側で強制的にシャッフルし、
+ * options/explanations/option_citations/correctを同じ並び替えで一貫させて上書きする。
+ */
+function shuffleOptions(q: {
+  options: string[];
+  explanations: string[];
+  option_citations: { chunk_id: number; quote: string }[][];
+  correct: number[];
+}): void {
+  const order = [0, 1, 2, 3, 4];
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  const oldToNewPos = new Map(order.map((oldIdx, newIdx) => [oldIdx + 1, newIdx + 1]));
+  q.options = order.map((oldIdx) => q.options[oldIdx]);
+  q.explanations = order.map((oldIdx) => q.explanations[oldIdx]);
+  q.option_citations = order.map((oldIdx) => q.option_citations[oldIdx]);
+  q.correct = q.correct.map((c) => oldToNewPos.get(c)!).sort((a, b) => a - b);
+}
+
 function chunkBlock(chunks: RetrievedChunk[]): string {
   return chunks
     .map((c) => `<chunk id="${c.id}" book="${c.book}" pages="${c.page_start}-${c.page_end}">\n${c.content}\n</chunk>`)
@@ -640,6 +665,10 @@ ${pastExcerpts.length ? pastExcerpts.map((e, i) => `${i + 1}. ${e}...`).join("\n
       lastProblems = formatProblems;
       continue;
     }
+
+    // 選択肢中の正答位置に生成バイアスが乗らないよう、検証前に強制シャッフルしておく
+    // （検証パス・DB保存のどちらもシャッフル後の並びを見ることになり、一貫性がある）
+    shuffleOptions(q);
 
     // 4. 検証パス: 根拠テキストと照合
     // ここも生成パスと同様に、科目・項目非依存の指示文と、根拠チャンク（同一項目の
