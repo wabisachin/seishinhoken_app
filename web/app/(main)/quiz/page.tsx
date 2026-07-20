@@ -591,37 +591,23 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
         )}
         {mode === "review" && !error && (
           <>
-            {/* 記憶の庭への入り口。復習モードの下に置く（ユーザー指示）。対象30問未満は
-                グレーアウトして選択できないようにする（毎回同じ数問の繰り返しになるのを防ぐため）。 */}
-            {!reviewSummaryLoading && gardenSummary && (
-              <div
-                className={`mb-3 rounded-2xl border-l-4 p-4 shadow-warm ${
-                  gardenSummary.eligibleCount >= GARDEN_MIN_ELIGIBLE
-                    ? "border-emerald-400 bg-white"
-                    : "cursor-not-allowed border-stone-300 bg-stone-100 opacity-60"
-                }`}
+            {/* 記憶の庭への入り口。復習モードの下に置く。対象30問未満の間は、グレーアウト
+                表示ではなく項目自体を出さない（早い段階から見えても選べず紛らわしいため）。 */}
+            {!reviewSummaryLoading && gardenSummary && gardenSummary.eligibleCount >= GARDEN_MIN_ELIGIBLE && (
+              <Link
+                href="/quiz?mode=garden"
+                className="mb-3 block rounded-2xl border-l-4 border-emerald-400 bg-white p-4 shadow-warm transition-all hover:-translate-y-0.5 hover:shadow-warm-lg"
               >
-                {gardenSummary.eligibleCount >= GARDEN_MIN_ELIGIBLE ? (
-                  <Link href="/quiz?mode=garden" className="block">
-                    <p className="font-bold text-emerald-700">🌱 記憶の庭</p>
-                    <p className="mt-1 text-sm text-stone-600">
-                      克服済みだが1カ月以上前で忘れかけている問題を再テスト（対象{gardenSummary.eligibleCount}問）
-                    </p>
-                    <p className="mt-1 text-xs text-stone-400">
-                      {gardenSummary.lastPlayedAt
-                        ? `前回実施: ${new Date(gardenSummary.lastPlayedAt).toLocaleDateString("ja-JP")}`
-                        : "まだ実施していません"}
-                    </p>
-                  </Link>
-                ) : (
-                  <>
-                    <p className="font-bold text-stone-500">🌱 記憶の庭</p>
-                    <p className="mt-1 text-sm text-stone-500">
-                      対象問題 {gardenSummary.eligibleCount}/{GARDEN_MIN_ELIGIBLE}問（もう少し克服が進むと選べるようになります）
-                    </p>
-                  </>
-                )}
-              </div>
+                <p className="font-bold text-emerald-700">🌱 記憶の庭</p>
+                <p className="mt-1 text-sm text-stone-600">
+                  克服済みだが1カ月以上前で忘れかけている問題を再テスト（対象{gardenSummary.eligibleCount}問）
+                </p>
+                <p className="mt-1 text-xs text-stone-400">
+                  {gardenSummary.lastPlayedAt
+                    ? `前回実施: ${new Date(gardenSummary.lastPlayedAt).toLocaleDateString("ja-JP")}`
+                    : "まだ実施していません"}
+                </p>
+              </Link>
             )}
             {reviewSummaryLoading ? (
               <p className="text-sm text-stone-600">読み込み中...</p>

@@ -35,7 +35,8 @@ type Narrative = {
   greeting: string;
   highlights: string[];
   weaknessNarrative: string;
-  focusAreas: { subject: string; why: string }[];
+  focusAreas: string[];
+  focusAreasSummary: string;
   planNarration: string;
 };
 type Report = {
@@ -179,11 +180,14 @@ function ReportDetailInner() {
 
         {mistake_analysis.fundamentalIssues.length > 0 && (
           <div className="mt-4 space-y-2">
-            <p className="text-xs font-bold text-stone-500">本質的な課題</p>
+            <p className="text-xs font-bold text-stone-500">本質的な課題 TOP{mistake_analysis.fundamentalIssues.length}</p>
             {mistake_analysis.fundamentalIssues.map((issue, i) => (
-              <div key={i} className="rounded-xl bg-red-50 p-3 text-sm">
-                <p className="font-bold text-red-800">{issue.label}</p>
-                <p className="mt-1 text-red-700">{issue.evidence}</p>
+              <div key={i} className="flex gap-2 rounded-xl bg-red-50 p-3 text-sm">
+                <span className="shrink-0 font-bold text-red-400">{i + 1}位</span>
+                <div>
+                  <p className="font-bold text-red-800">{issue.label}</p>
+                  <p className="mt-1 text-red-700">{issue.evidence}</p>
+                </div>
               </div>
             ))}
           </div>
@@ -209,12 +213,14 @@ function ReportDetailInner() {
       {narrative.focusAreas.length > 0 && (
         <section className="rounded-2xl bg-white p-5 shadow-warm">
           <h2 className="mb-2 font-bold text-indigo-700">次月の重点科目</h2>
-          <div className="space-y-2">
-            {narrative.focusAreas.map((f, i) => (
-              <div key={i} className="rounded-xl bg-indigo-50 p-3 text-sm">
-                <p className="font-bold text-indigo-800">{f.subject}</p>
-                <p className="mt-0.5 text-indigo-700">{f.why}</p>
-              </div>
+          {narrative.focusAreasSummary && (
+            <p className="mb-3 text-sm leading-relaxed text-stone-600">{narrative.focusAreasSummary}</p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            {narrative.focusAreas.map((subject, i) => (
+              <span key={i} className="rounded-full bg-indigo-50 px-3 py-1.5 text-sm font-bold text-indigo-800">
+                {subject}
+              </span>
             ))}
           </div>
         </section>
