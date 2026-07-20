@@ -163,15 +163,15 @@ function WeaknessRow({ s, medianTotal }: { s: ReviewSubject; medianTotal: number
 
   const badge =
     category === "needsReview" ? (
-      <span className="whitespace-nowrap rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-700">残り{s.wrongCount}問</span>
+      <span className="shrink-0 whitespace-nowrap rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-700">残り{s.wrongCount}問</span>
     ) : category === "untouched" ? (
-      <span className="whitespace-nowrap rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">未挑戦</span>
+      <span className="shrink-0 whitespace-nowrap rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">未挑戦</span>
     ) : isPerfect ? (
-      <span className="whitespace-nowrap rounded-full bg-gradient-to-r from-amber-300 via-yellow-200 to-amber-400 px-2 py-0.5 text-xs font-extrabold text-amber-900 shadow-sm">
+      <span className="shrink-0 whitespace-nowrap rounded-full bg-gradient-to-r from-amber-300 via-yellow-200 to-amber-400 px-2 py-0.5 text-xs font-extrabold text-amber-900 shadow-sm">
         ✨ PERFECT
       </span>
     ) : (
-      <span className="whitespace-nowrap rounded-full bg-green-100 px-2 py-0.5 text-xs font-bold text-green-700">OK</span>
+      <span className="shrink-0 whitespace-nowrap rounded-full bg-green-100 px-2 py-0.5 text-xs font-bold text-green-700">OK</span>
     );
 
   // 解答数が少ない科目(thin)は、間違えたまま残っている問題があっても復習ではなく
@@ -191,18 +191,19 @@ function WeaknessRow({ s, medianTotal }: { s: ReviewSubject; medianTotal: number
   const linkContent = (
     <>
       {/* 科目名は可変長（短い「医学概論」〜長い「ソーシャルワークの理論と方法(専門)」まで）
-          なので、固定幅のtruncateにはせずflex-1で余白を優先的に割り当て、進捗バーは
-          あくまで補助的な装飾として小さめの固定幅にする（見切れて判別しづらくなるのを防ぐ） */}
+          なので、固定幅のtruncateにはせずflex-1で余白を優先的に割り当てる。
+          バッジは「残り199問」「未挑戦」「✨ PERFECT」「OK」で文字数が大きく異なるが、
+          shrink-0のまま自然な幅で置く（固定幅の箱に収めると、狭いバッジの分だけ
+          科目名の表示幅を無駄に奪ってしまうため）。
+          進捗バーはあくまで補助的な装飾として、あえて最後（一番右）に置く。行の右端から
+          固定幅ぶん内側、という常に一定の位置になるため、バッジの文字数が変わっても
+          バーの開始位置は揃う（科目名やバッジの幅が変わって動くのは、目立たないバーの
+          手前側の余白だけになる） */}
       <span className="min-w-0 flex-1 truncate text-sm text-stone-700">{s.subject}</span>
+      {badge}
       <div className="h-2 w-10 shrink-0 overflow-hidden rounded-full bg-stone-100 sm:w-16">
         <div className={`h-full rounded-full ${barColor}`} style={{ width: `${barPercent}%` }} />
       </div>
-      {/* バッジ本文の文字数は「残り199問」「未挑戦」「✨ PERFECT」「OK」で大きく異なる。
-          badgeをそのまま(shrink-0の可変幅)並べると、その幅の差分だけ手前のflex-1（科目名）に
-          割り当てられる幅が変わってしまい、結果として進捗バーの開始位置が行ごとにズレて見える
-          （ユーザー報告の実際の原因）。バッジを固定幅の箱に収め、幅そのものを一定にすることで、
-          科目名の幅ひいては進捗バーの開始位置を全行で揃える */}
-      <div className="flex w-28 shrink-0 justify-end">{badge}</div>
     </>
   );
 

@@ -72,6 +72,15 @@ export default function GuidePage() {
       </section>
 
       <section className="rounded-2xl bg-white p-5 shadow-warm">
+        <h2 className="font-bold text-indigo-700">教科書の根拠について</h2>
+        <p className="mt-2 text-sm leading-relaxed text-stone-700">
+          解説の下に「教科書の根拠」として、実際にその教科書から抜き出した文章が表示されます。
+          古い教科書PDFの都合で、まれに文字が読みにくくなっている箇所がありますが、
+          問題や解説自体の正しさには影響しません。
+        </p>
+      </section>
+
+      <section className="rounded-2xl bg-white p-5 shadow-warm">
         <h2 className="font-bold text-indigo-700">学習サイクルの全体像</h2>
         <p className="mt-2 text-sm leading-relaxed text-stone-700">
           解いた問題は、正解・誤答に応じて自動的に次のプールへ移っていきます。全体の流れは次の通りです。
@@ -110,10 +119,17 @@ export default function GuidePage() {
         <div className="mt-4 rounded-xl bg-stone-50 p-4 text-sm leading-relaxed text-stone-700">
           <p className="font-medium text-stone-900">📦 科目ごとの問題ストックには上限があります</p>
           <p className="mt-1.5">
-            科目ごとにAIが新しく問題を作り続け、最大200問まで貯まります。200問に達すると新規作成は止まり、
-            以降はこの200問の中からの出題だけになります。新しい問題に出会える割合は、貯まった問題数が
-            増えるほど少しずつ下がっていきます（0問のときはほぼ100%、100問で約50%、200問以降は最低ラインの
-            25%で下げ止まります）。
+            科目ごとにAIが新しく問題を作り続け、最大200問まで貯まります。200問に達すると、AIによる
+            新規作成はそこで完全に停止します。
+          </p>
+          <p className="mt-1.5">
+            ただし「新規作成の停止」と「あなた自身がまだ解いたことのない問題に出会えるかどうか」は
+            別の話です。出題のたびに「まだ解いたことのない問題を優先するか、すでに解いたことのある
+            問題を出すか」を確率で決めており、その確率は貯まった問題数が増えるほど下がっていきます
+            （0問のときはほぼ100%、100問で約50%、200問以降は最低ラインの25%で下げ止まり）。つまり
+            200問に達した後も、その200問の中にまだ解いていないものが残っている間は、そのうちの
+            1問に出会える可能性が一定割合残っています。200問すべてを解き終えた後は、当然すべて
+            すでに解いたことのある問題からの再出題になります。
           </p>
           <p className="mt-1.5">
             演習モード（科目別演習・全科目演習）で出題される「すでに解いたことのある問題」には、復習プールや
@@ -132,51 +148,6 @@ export default function GuidePage() {
           ほとんどありません。ストックがたまたま切れているタイミングなど、まれにその場で
           新しい問題を用意することがあり、その場合だけ20〜40秒ほどかかります。表示されたら
           少しだけそのままお待ちください。自動的に問題が表示されます。
-        </p>
-      </section>
-
-      <section className="rounded-2xl bg-white p-5 shadow-warm">
-        <h2 className="font-bold text-indigo-700">使い込むほど、問題の出方が変わっていきます</h2>
-        <div className="mt-2 space-y-2 text-sm leading-relaxed text-stone-700">
-          <p>
-            ある科目を使い始めたばかりのころは、出てくる問題はほぼ毎回まったくの新作です。
-          </p>
-          <p>
-            その科目でだいぶ問題が貯まってくると、少しずつ「前に見たことのある問題」が
-            混ざるようになります。真新しさより、たくさん練習できることを優先する切り替えです。
-          </p>
-          <p>
-            さらに問題が十分な数まで貯まった科目については、それ以上の新作は作らなくなり、
-            すでに貯まった問題の中から出題されるようになります。「もう問題が増えないな」と
-            感じたら、その科目はしっかりストックが貯まったということです。
-          </p>
-        </div>
-      </section>
-
-      <section className="rounded-2xl bg-white p-5 shadow-warm">
-        <h2 className="font-bold text-indigo-700">解いている途中でアプリを閉じてしまっても</h2>
-        <p className="mt-2 text-sm leading-relaxed text-stone-700">
-          科目別演習や全科目演習の途中でブラウザを閉じたり、リロードしてしまっても大丈夫です。
-          次にそのモードを開いたときに「前回の続きから再開しますか？」という案内が出るので、
-          そこから続けるか、新しく始めるかを選べます。
-        </p>
-      </section>
-
-      <section className="rounded-2xl bg-white p-5 shadow-warm">
-        <h2 className="font-bold text-indigo-700">教科書の根拠について</h2>
-        <p className="mt-2 text-sm leading-relaxed text-stone-700">
-          解説の下に「教科書の根拠」として、実際にその教科書から抜き出した文章が表示されます。
-          古い教科書PDFの都合で、まれに文字が読みにくくなっている箇所がありますが、
-          問題や解説自体の正しさには影響しません。
-        </p>
-      </section>
-
-      <section className="rounded-2xl bg-white p-5 shadow-warm">
-        <h2 className="font-bold text-indigo-700">教科書検索について</h2>
-        <p className="mt-2 text-sm leading-relaxed text-stone-700">
-          「見て覚える！国試ナビ」はイラスト中心で図解がわかりやすい教材です。調べたい言葉を
-          入力すると、意味の近いページを画像で見つけて表示します。解説画面でも、関連する
-          国試ナビのページがあれば「関連する国試ナビのページ」として自動的に案内されます。
         </p>
       </section>
 
@@ -200,6 +171,33 @@ export default function GuidePage() {
       </section>
 
       <section className="rounded-2xl bg-white p-5 shadow-warm">
+        <h2 className="font-bold text-indigo-700">🤖 「おすすめの次の一手」の決め方</h2>
+        <p className="mt-2 text-sm leading-relaxed text-stone-700">
+          ホーム画面のおすすめは、以下の考え方を優先順位の高い順にAIが確認しながら、
+          今のあなたの状況に一番合う行動を1つだけ選んで提案しています。
+        </p>
+        <div className="mt-3 rounded-xl border-l-4 border-stone-300 bg-stone-50 p-3 text-sm text-stone-700">
+          <span className="font-bold">最優先:</span> 前回途中で終えた演習があれば、他の何より先にその続きを提案します
+        </div>
+        <div className="mt-3">
+          <RankStep n={1} condition="まだ一度も演習していない・判断材料が少ない科目が全体的に多い" action="全科目演習（共通科目・専門科目のうち手薄な方）" note="対象を1つに絞れないため、広く判断材料を集めることを優先" />
+          <RankStep n={2} condition="前回の実戦模試で0点だった科目群がある" action="その中で一番弱い科目を科目別演習" note="合格基準に直結するため最優先で対応" />
+          <RankStep n={3} condition="実戦模試（未知の問題）での正答率が低い科目がある" action="その科目を科目別演習" note="演習だけでは見えない「対応力不足」への対処" />
+          <RankStep n={4} condition="科目の未出題ストックが薄い科目がある" action="1〜2件程度なら最もストックが薄い科目を科目別演習、3件以上と広範囲なら全科目演習" note="対象を絞れる場合は、その科目を訪れること自体がストック補充のきっかけになる" />
+          <RankStep n={5} condition="想起の庭の対象問題がある（30問以上）" action="想起の庭で忘れかけている問題を再テスト" note="下の「苦手科目の復習で潰す」より優先度が高い（ただし連続提案は避ける）" />
+          <RankStep n={6} condition="間違えたまま残っている問題が多い苦手科目トップ3がある" action="科目別演習、または復習モード" note="判断材料が十分なら復習モード、不足していれば科目別演習を優先。ただし復習が60問以上溜まっていれば判断材料が少なくても復習モードを優先" />
+          <RankStep n={7} condition="他の科目に比べて演習量が相対的に少なめの科目がある" action="1〜2件程度なら最も演習量が少ない科目を科目別演習、3件以上と広範囲なら全科目演習" />
+          <RankStep n={8} condition="実戦模試を受けられる状況（月内のペース配分も考慮）" action="実戦模試で力試し" />
+          <RankStep n={9} condition="上記のいずれにも当てはまらない" action="全科目演習を継続" isLast />
+        </div>
+        <p className="mt-3 text-xs leading-relaxed text-stone-400">
+          実際の判断はAIが行い、上記の考え方を基本の軸にしつつ、学習プランの遅れ具合などその場の状況も
+          踏まえて柔軟に判断します。毎回まったく同じ提案ばかりにならないよう、時には気分転換として
+          別の選択肢を提案することもあります。
+        </p>
+      </section>
+
+      <section className="rounded-2xl bg-white p-5 shadow-warm">
         <h2 className="font-bold text-indigo-700">学習の振り返りレポートについて</h2>
         <p className="mt-2 text-sm leading-relaxed text-stone-700">
           月が変わると、前月の学習を振り返るレポートが自動的に作られます。解いた問題数・
@@ -211,34 +209,20 @@ export default function GuidePage() {
       </section>
 
       <section className="rounded-2xl bg-white p-5 shadow-warm">
-        <h2 className="font-bold text-indigo-700">🤖 「おすすめの次の一手」の決め方</h2>
+        <h2 className="font-bold text-indigo-700">教科書検索について</h2>
         <p className="mt-2 text-sm leading-relaxed text-stone-700">
-          ホーム画面のおすすめは、以下の考え方を優先順位の高い順にAIが確認しながら、
-          今のあなたの状況に一番合う行動を1つだけ選んで提案しています。
+          「見て覚える！国試ナビ」はイラスト中心で図解がわかりやすい教材です。調べたい言葉を
+          入力すると、意味の近いページを画像で見つけて表示します。解説画面でも、関連する
+          国試ナビのページがあれば「関連する国試ナビのページ」として自動的に案内されます。
         </p>
-        <div className="mt-3 rounded-xl border-l-4 border-stone-300 bg-stone-50 p-3 text-sm text-stone-700">
-          <span className="font-bold">最優先:</span> 前回途中で終えた演習があれば、他の何より先にその続きを提案します
-        </div>
-        <div className="mt-3">
-          <RankStep n={1} condition="まだ一度も演習していない・判断材料が少ない科目が全体的に多い" action="全科目演習（共通科目・専門科目のうち手薄な方）" note="判断材料を広く集めることを優先" />
-          <RankStep n={2} condition="前回の実戦模試で0点だった科目群がある" action="その中で一番弱い科目を科目別演習" note="合格基準に直結するため最優先で対応" />
-          <RankStep n={3} condition="実戦模試（未知の問題）での正答率が低い科目がある" action="その科目を科目別演習" note="演習だけでは見えない「対応力不足」への対処" />
-          <RankStep n={4} condition="科目の未出題ストックが薄い科目がある" action="全科目演習でストックを底上げ" />
-          <RankStep n={5} condition="間違えたまま残っている問題が多い苦手科目トップ3がある" action="科目別演習、または復習モード" note="判断材料が十分なら復習モード、不足していれば科目別演習を優先。ただし復習が20問以上溜まっていれば判断材料が少なくても復習モードを優先" />
-          <RankStep n={6} condition="他の科目に比べて演習量が相対的に少なめの科目がある" action="全科目演習で底上げ" />
-          <RankStep n={7} condition="実戦模試を受けられる状況（月内のペース配分も考慮）" action="実戦模試で力試し" />
-          <RankStep n={8} condition="上記のいずれにも当てはまらない" action="全科目演習を継続" isLast />
-        </div>
-        <div className="mt-3 space-y-1.5 rounded-xl bg-emerald-50 p-3 text-xs leading-relaxed text-emerald-800">
-          <p>
-            🌱 想起の庭（対象30問以上で選べるようになります）は合否に直結する優先度が高くないため、
-            他に優先すべき弱点が無く、しばらく実施していない場合の選択肢として提案されることがあります。
-          </p>
-        </div>
-        <p className="mt-3 text-xs leading-relaxed text-stone-400">
-          実際の判断はAIが行い、上記の考え方を基本の軸にしつつ、学習プランの遅れ具合などその場の状況も
-          踏まえて柔軟に判断します。毎回まったく同じ提案ばかりにならないよう、時には気分転換として
-          別の選択肢を提案することもあります。
+      </section>
+
+      <section className="rounded-2xl bg-white p-5 shadow-warm">
+        <h2 className="font-bold text-indigo-700">解いている途中でアプリを閉じてしまっても</h2>
+        <p className="mt-2 text-sm leading-relaxed text-stone-700">
+          科目別演習や全科目演習の途中でブラウザを閉じたり、リロードしてしまっても大丈夫です。
+          次にそのモードを開いたときに「前回の続きから再開しますか？」という案内が出るので、
+          そこから続けるか、新しく始めるかを選べます。
         </p>
       </section>
     </div>
