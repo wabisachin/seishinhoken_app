@@ -505,6 +505,38 @@ export default function Dashboard() {
               style={{ width: `${Math.min(100, Math.round((100 * planProgress.doneTotal) / planProgress.planTotal))}%` }}
             />
           </div>
+
+          {/* 「何をすれば進むか」が一目でわかるよう、未達の科目だけを少数厳選して出す
+              （全科目分の詳細は振り返りレポート側にあるため、ここでは詳しくしすぎない） */}
+          {(() => {
+            const remaining = planProgress.bySubject.filter((s) => s.done < s.target).sort((a, b) => b.target - b.done - (a.target - a.done));
+            const SHOWN = 4;
+            const shown = remaining.slice(0, SHOWN);
+            if (remaining.length === 0) {
+              return <p className="mt-3 text-sm font-medium text-emerald-600">🎉 今月の目標科目はすべて達成しました</p>;
+            }
+            return (
+              <div className="mt-3 space-y-1.5">
+                {shown.map((s) => (
+                  <div key={s.subject} className="flex items-center gap-2">
+                    <span className="w-28 shrink-0 truncate text-xs text-stone-600 sm:w-36">{s.subject}</span>
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-stone-100">
+                      <div
+                        className="h-full rounded-full bg-indigo-400"
+                        style={{ width: `${Math.min(100, Math.round((100 * s.done) / s.target))}%` }}
+                      />
+                    </div>
+                    <span className="w-12 shrink-0 text-right text-xs text-stone-500">
+                      {s.done}/{s.target}
+                    </span>
+                  </div>
+                ))}
+                {remaining.length > SHOWN && (
+                  <p className="text-xs text-stone-400">ほか{remaining.length - SHOWN}科目が未達です</p>
+                )}
+              </div>
+            );
+          })()}
         </section>
       )}
 
