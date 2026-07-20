@@ -52,11 +52,22 @@ async function fetchUnseenActive(
   // （科目別演習の出題形式フィルタ用。未指定なら従来通り全形式を対象にする）
   if (caseAxis === "case") query = query.not("case_text", "is", null);
   if (caseAxis === "nocase") query = query.is("case_text", null);
-  query = query.limit(1);
   if (excludeIds.length > 0) query = query.not("id", "in", `(${excludeIds.join(",")})`);
   const { data, error } = await query;
   if (error) throw new Error(error.message);
-  return ((data ?? [])[0] as Question | undefined) ?? null;
+  const rows = (data ?? []) as Question[];
+  if (rows.length === 0) return null;
+
+  // 「未出題」とは本人がこれまで一度も解答したことがない問題を指す（countUnservedActiveと
+  // 同じ定義）。この判定を怠ると、excludeIdsは今回のセッション内でしか積み上がらないため、
+  // セッションをまたぐたび（例:「もう一度」ボタン）にORDER BY未指定のクエリが返す先頭の
+  // 既出問題が毎回同じ順番で繰り返し出題されてしまう（実際に発生したバグの再発防止）。
+  const ids = rows.map((r) => r.id);
+  const { data: attempted } = await supabase().from("attempts").select("question_id").eq("profile", profile).in("question_id", ids);
+  const attemptedIds = new Set((attempted ?? []).map((r) => r.question_id as number));
+  const unseen = rows.filter((r) => !attemptedIds.has(r.id));
+  if (unseen.length === 0) return null;
+  return unseen[Math.floor(Math.random() * unseen.length)];
 }
 
 /**
