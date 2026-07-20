@@ -98,7 +98,7 @@ async function requestNextQuestion(
   subject: string,
   excludeIds: number[],
   caseFilter: CaseFilter,
-): Promise<{ question: Question | null; exhausted: boolean }> {
+): Promise<{ question: Question | null; exhausted: boolean; isNew: boolean }> {
   const res = await fetch("/api/quiz/next", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -111,7 +111,7 @@ async function requestNextQuestion(
   });
   const d = await res.json();
   if (d.error) throw new Error(d.error);
-  return { question: (d.question as Question | null) ?? null, exhausted: !!d.exhausted };
+  return { question: (d.question as Question | null) ?? null, exhausted: !!d.exhausted, isNew: !!d.isNew };
 }
 
 function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: string | null }) {
@@ -141,13 +141,20 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
   const [reviewTotalWrong, setReviewTotalWrong] = useState(0);
   const [reviewSummaryLoading, setReviewSummaryLoading] = useState(true);
   const [gardenSummary, setGardenSummary] = useState<{ eligibleCount: number; lastPlayedAt: string | null } | null>(null);
+  // 今回のセッションで「本人が一度も解答したことがない」状態で出題された問題のID集合。
+  // NEWバッジ表示用（リロードすると消えるだけの軽量な表示上のフラグなので、
+  // localStorageへの永続化はしない）。
+  const [newQuestionIds, setNewQuestionIds] = useState<Set<number>>(new Set());
+  const markNew = useCallback((id: number) => {
+    setNewQuestionIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+  }, []);
   const cancelledRef = useRef(false);
   // 分野別モード: セッション開始直後から、残り問題を裏で連続的に先読みしておく
   // （1問先読みだけだと、読むのが速いユーザーには追いつけないため、模試の
   // バックグラウンドランナーと同じ考え方でセッション分すべて先読みを進める）。
   // 各問題は前の問題のIDをexcludeIdsに積み上げる必要があり並列化できないため、
   // 1問ずつ順番に取得しながらMapに結果を積んでいく。
-  const prefetchQueueRef = useRef<Map<number, Promise<{ question: Question | null; exhausted: boolean }>>>(new Map());
+  const prefetchQueueRef = useRef<Map<number, Promise<{ question: Question | null; exhausted: boolean; isNew: boolean }>>>(new Map());
   const prefetchChainStartedRef = useRef(false);
 
   useEffect(() => {
@@ -254,8 +261,11 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
   const waitForNextSubjectQuestion = useCallback(
     async (excludeIds: number[]) => {
       for (let attempt = 0; attempt < MAX_NEXT_ATTEMPTS && !cancelledRef.current; attempt++) {
-        const { question, exhausted } = await requestNextQuestion(subject, excludeIds, caseFilter);
-        if (question) return question;
+        const { question, exhausted, isNew } = await requestNextQuestion(subject, excludeIds, caseFilter);
+        if (question) {
+          if (isNew) markNew(question.id);
+          return question;
+        }
         if (exhausted) {
           throw new Error("この科目・出題形式ではこれ以上出題できる問題がありません（上限に達しました）。");
         }
@@ -266,7 +276,7 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
         "問題の生成に時間がかかりすぎています。この分野は教科書の記述から出題を作りにくく、生成のやり直しが続いている可能性があります。時間をおいて再度お試しください。",
       );
     },
-    [subject, caseFilter],
+    [subject, caseFilter, markNew],
   );
 
   // 却下等で取得できなかった場合だけ、フォアグラウンドと同じ回数だけ静かにリトライする
@@ -274,10 +284,14 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
   const silentlyFetchOne = useCallback(
     async (excludeIds: number[]) => {
       for (let attempt = 0; attempt < MAX_NEXT_ATTEMPTS && !cancelledRef.current; attempt++) {
-        const result = await requestNextQuestion(subject, excludeIds, caseFilter).catch(() => ({ question: null, exhausted: false }));
+        const result = await requestNextQuestion(subject, excludeIds, caseFilter).catch(() => ({
+          question: null,
+          exhausted: false,
+          isNew: false,
+        }));
         if (result.question || result.exhausted) return result;
       }
-      return { question: null, exhausted: false };
+      return { question: null, exhausted: false, isNew: false };
     },
     [subject, caseFilter],
   );
@@ -424,6 +438,7 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
         const queued = prefetchQueueRef.current.get(nextIndex);
         prefetchQueueRef.current.delete(nextIndex);
         const prefetchedResult = queued ? await queued : null;
+        if (prefetchedResult?.question && prefetchedResult.isNew) markNew(prefetchedResult.question.id);
         const nextQ = prefetchedResult?.question ?? (await waitForNextSubjectQuestion(excludeIds));
         const nextQuestions = [...questions, nextQ];
         setQuestions(nextQuestions);
@@ -812,6 +827,9 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
         <span>
           {index + 1} / {mode === "subject" ? count : questions.length} 問目
           <span className="ml-3 rounded bg-stone-200 px-2 py-0.5 text-xs">{q.subject}</span>
+          {newQuestionIds.has(q.id) && (
+            <span className="ml-1.5 rounded bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-700">NEW</span>
+          )}
         </span>
         <span>{q.question_type === "multi" ? "2つ選択" : "1つ選択"}</span>
       </div>

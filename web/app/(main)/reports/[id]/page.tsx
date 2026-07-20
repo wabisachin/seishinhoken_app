@@ -285,23 +285,31 @@ function ReportDetailInner() {
         <h2 className="mb-2 font-bold text-indigo-700">次月の学習プラン</h2>
         <p className="mb-3 text-sm leading-relaxed text-stone-700">{narrative.planNarration}</p>
         {plan.bySubject.filter((s) => s.reviewSets + s.practiceSets > 0).length > 0 && (
-          <div className="space-y-1.5">
-            {plan.bySubject
-              .filter((s) => s.reviewSets + s.practiceSets > 0)
-              .map((s) => {
-                const reviewQuestions = s.reviewSets * plan.setSize;
-                const practiceQuestions = s.practiceSets * plan.setSize;
-                return (
-                  <div key={s.subject} className="flex items-center justify-between gap-2 rounded-lg bg-stone-50 p-2 text-sm">
-                    <span className="truncate text-stone-700">{s.subject}</span>
-                    <span className="shrink-0 text-stone-500">
-                      {reviewQuestions > 0 && `復習${reviewQuestions}問`}
-                      {reviewQuestions > 0 && practiceQuestions > 0 && " / "}
-                      {practiceQuestions > 0 && `演習${practiceQuestions}問`}
-                    </span>
-                  </div>
-                );
-              })}
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-stone-200 text-xs text-stone-400">
+                  <th className="py-1.5 text-left font-normal">科目</th>
+                  <th className="py-1.5 text-right font-normal">復習</th>
+                  <th className="py-1.5 text-right font-normal">演習</th>
+                </tr>
+              </thead>
+              <tbody>
+                {plan.bySubject
+                  .filter((s) => s.reviewSets + s.practiceSets > 0)
+                  .map((s) => {
+                    const reviewQuestions = s.reviewSets * plan.setSize;
+                    const practiceQuestions = s.practiceSets * plan.setSize;
+                    return (
+                      <tr key={s.subject} className="border-b border-stone-100 last:border-0">
+                        <td className="max-w-0 truncate py-1.5 pr-2 text-stone-700">{s.subject}</td>
+                        <td className="py-1.5 text-right text-stone-600">{reviewQuestions > 0 ? `${reviewQuestions}問` : "―"}</td>
+                        <td className="py-1.5 text-right text-stone-600">{practiceQuestions > 0 ? `${practiceQuestions}問` : "―"}</td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
           </div>
         )}
         <p className="mt-3 text-xs text-stone-400">本番まであと{plan.examDaysRemaining}日</p>

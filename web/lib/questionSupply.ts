@@ -552,6 +552,8 @@ export type NextQuestionResult = {
   question: Question | null;
   /** true: 上限に達しており、かつ出せる問題も無い（=これ以上待っても無駄、即エラー表示してよい） */
   exhausted: boolean;
+  /** true: 本人が一度も解答したことがない問題（questionがnullの場合は無意味）。UIのNEWバッジ表示に使う。 */
+  isNew: boolean;
 };
 
 /**
@@ -628,23 +630,23 @@ export async function getOrGenerateNext(
 
   async function tryNew(): Promise<NextQuestionResult | null> {
     const existing = await fetchUnseenActive(subject, excludeIds, profile, caseAxis);
-    if (existing) return { question: existing, exhausted: false };
+    if (existing) return { question: existing, exhausted: false, isNew: true };
     if (!canGenerate) return null;
     const fresh = await attemptLiveGeneration(subject, profile, caseAxis);
-    if (fresh) return { question: fresh, exhausted: false };
+    if (fresh) return { question: fresh, exhausted: false, isNew: true };
     // 却下された場合、直後に別経路で未出題が増えていないか念のため再確認してから、
     // まだ生成の余地があるかどうかで「クライアントにリトライさせる」か諦めるかを決める。
     const unseenAfterReject = await fetchUnseenActive(subject, excludeIds, profile, caseAxis);
-    if (unseenAfterReject) return { question: unseenAfterReject, exhausted: false };
+    if (unseenAfterReject) return { question: unseenAfterReject, exhausted: false, isNew: true };
     const stillCanGenerate = (await countBySubject(subject, ["active", "rejected"], "general", profile)) < HARD_CAP_TOTAL;
     // まだ試行の余地がある（クライアントがリトライすれば良い）ので、ここではexhausted扱いにしない
-    if (stillCanGenerate) return { question: null, exhausted: false };
+    if (stillCanGenerate) return { question: null, exhausted: false, isNew: false };
     return null;
   }
 
   async function tryExisting(): Promise<NextQuestionResult | null> {
     const repeat = await fetchLeastAttempted(subject, profile, caseAxis, excludeIds);
-    if (repeat) return { question: repeat, exhausted: false };
+    if (repeat) return { question: repeat, exhausted: false, isNew: false };
     return null;
   }
 
@@ -653,5 +655,5 @@ export async function getOrGenerateNext(
   const fallback = preferNew ? await tryExisting() : await tryNew();
   if (fallback) return fallback;
   // 新規側・既出側どちらにも候補が無い（＝この科目にactiveな問題が1問も無い）
-  return { question: null, exhausted: true };
+  return { question: null, exhausted: true, isNew: false };
 }

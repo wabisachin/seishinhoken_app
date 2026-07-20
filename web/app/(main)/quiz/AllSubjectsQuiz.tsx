@@ -46,7 +46,7 @@ function clearPersisted() {
 async function requestNextQuestion(
   subject: string,
   excludeIds: number[],
-): Promise<{ question: Question | null; exhausted: boolean }> {
+): Promise<{ question: Question | null; exhausted: boolean; isNew: boolean }> {
   const res = await fetch("/api/quiz/next", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -54,14 +54,17 @@ async function requestNextQuestion(
   });
   const d = await res.json();
   if (d.error) throw new Error(d.error);
-  return { question: (d.question as Question | null) ?? null, exhausted: !!d.exhausted };
+  return { question: (d.question as Question | null) ?? null, exhausted: !!d.exhausted, isNew: !!d.isNew };
 }
 
 /** 全科目演習も科目別演習と全く同じロジック（questionSupply.ts の getOrGenerateNext）で1問を取得する。 */
-async function fetchOneQuestion(subject: string, onAttempt: ((n: number) => void) | null): Promise<Question | null> {
+async function fetchOneQuestion(
+  subject: string,
+  onAttempt: ((n: number) => void) | null,
+): Promise<{ question: Question; isNew: boolean } | null> {
   for (let attempt = 0; attempt < MAX_NEXT_ATTEMPTS; attempt++) {
-    const { question, exhausted } = await requestNextQuestion(subject, []);
-    if (question) return question;
+    const { question, exhausted, isNew } = await requestNextQuestion(subject, []);
+    if (question) return { question, isNew };
     if (exhausted) return null;
     onAttempt?.(attempt + 1);
   }
@@ -111,11 +114,20 @@ export default function AllSubjectsQuiz() {
   // 科目ごとに1回だけ取得を開始し、結果(または進行中のPromise)をキャッシュする。
   // 演習が始まったらバックグラウンドのランナーが最後の科目まで順番に生成を進め続けるため、
   // ユーザーが今のセットを解いている間に何セットも先まで用意が進む。
-  const oneCacheRef = useRef<Map<string, Promise<Question | null>>>(new Map());
+  const oneCacheRef = useRef<Map<string, Promise<{ question: Question; isNew: boolean } | null>>>(new Map());
   const runnerActiveRef = useRef(false);
   const cancelledRef = useRef(false);
+  // 今回のセッションで「本人が一度も解答したことがない」状態で出題された問題のID集合。
+  // NEWバッジ表示用（リロードで消える表示上のフラグ。永続化はしない）。
+  const [newQuestionIds, setNewQuestionIds] = useState<Set<number>>(new Set());
+  function markNew(id: number) {
+    setNewQuestionIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+  }
 
-  function ensureOneStarted(subject: string, onAttempt: ((n: number) => void) | null = null): Promise<Question | null> {
+  function ensureOneStarted(
+    subject: string,
+    onAttempt: ((n: number) => void) | null = null,
+  ): Promise<{ question: Question; isNew: boolean } | null> {
     let p = oneCacheRef.current.get(subject);
     if (!p) {
       p = fetchOneQuestion(subject, onAttempt).catch((e) => {
@@ -187,11 +199,14 @@ export default function AllSubjectsQuiz() {
       setSubjectOrder(order);
       const firstSet: Question[] = [];
       for (let i = 0; i < Math.min(SET_SIZE, order.length); i++) {
-        const q = await ensureOneStarted(order[i], (n) => {
+        const r = await ensureOneStarted(order[i], (n) => {
           setPhase("loading");
           setGeneratingAttempt(n);
         });
-        if (q) firstSet.push(q);
+        if (r) {
+          firstSet.push(r.question);
+          if (r.isNew) markNew(r.question.id);
+        }
       }
       if (firstSet.length === 0) {
         setError("出題できる問題がまだありません。科目別演習で問題を生成してから試してください。");
@@ -293,11 +308,14 @@ export default function AllSubjectsQuiz() {
       for (const subject of nextSubjects) {
         // バックグラウンドランナーが既に用意できていれば即座に返る。まだなら
         // （ユーザーが解答が早く、ランナーがまだそこまで追いついていない場合）ここで待つ
-        const q = await ensureOneStarted(subject, (n) => {
+        const r = await ensureOneStarted(subject, (n) => {
           setPhase("generating");
           setGeneratingAttempt(n);
         });
-        if (q) nextSetQuestions.push(q);
+        if (r) {
+          nextSetQuestions.push(r.question);
+          if (r.isNew) markNew(r.question.id);
+        }
       }
       const nextQuestions = [...questions, ...nextSetQuestions];
       setQuestions(nextQuestions);
@@ -407,6 +425,9 @@ export default function AllSubjectsQuiz() {
               <div key={q.id} className="rounded-2xl bg-white p-4 shadow-warm sm:p-5">
                 <div className="mb-2 flex items-center gap-2 text-xs text-stone-400">
                   <span className="rounded bg-stone-200 px-2 py-0.5">{q.subject}</span>
+                  {newQuestionIds.has(q.id) && (
+                    <span className="rounded bg-emerald-100 px-2 py-0.5 font-bold text-emerald-700">NEW</span>
+                  )}
                 </div>
                 <div className="mb-2 flex items-start gap-2">
                   <span className={`shrink-0 font-bold ${a.isCorrect ? "text-green-600" : "text-red-600"}`}>
@@ -480,6 +501,9 @@ export default function AllSubjectsQuiz() {
           <div key={q.id} className="rounded-2xl bg-white p-4 shadow-warm sm:p-5">
             <div className="mb-2 flex items-center gap-2 text-xs text-stone-400">
               <span className="rounded bg-stone-200 px-2 py-0.5">{q.subject}</span>
+              {newQuestionIds.has(q.id) && (
+                <span className="rounded bg-emerald-100 px-2 py-0.5 font-bold text-emerald-700">NEW</span>
+              )}
               <span>{q.question_type === "multi" ? "2つ選択" : "1つ選択"}</span>
             </div>
             {q.case_text && (
