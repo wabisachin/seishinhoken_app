@@ -23,7 +23,13 @@ type ExamSummary = {
   thisMonthAccuracy: number;
   subjectsPracticed: number;
 };
-type NextAction = { action: "subject" | "review" | "mock" | "exam" | "garden"; targetSubject: string | null; reason: string; href: string };
+type NextAction = {
+  action: "subject" | "review" | "mock" | "exam" | "garden";
+  targetSubject: string | null;
+  part: "common" | "specialized" | null;
+  reason: string;
+  href: string;
+};
 
 const ACTION_LABEL: Record<NextAction["action"], string> = {
   subject: "科目別演習",
@@ -45,7 +51,7 @@ type PlanProgress = {
 // 状況（弱点ストック・受験回数など）が変わった場合に反映が遅れてしまう。そこで、判断材料と
 // なる状態のフィンガープリント（stateHash、lib/nextAction.tsで算出）をLLM呼び出し無しで
 // 安く取得し、前回と一致する間はキャッシュ済みの結果を使い回す方式にする
-const NEXT_ACTION_CACHE_KEY = "home_next_action_cache_v2";
+const NEXT_ACTION_CACHE_KEY = "home_next_action_cache_v3";
 type NextActionCache = NextAction & { stateHash: string };
 
 function loadCachedNextAction(): NextActionCache | null {
@@ -299,7 +305,15 @@ function WeaknessMapSection({ title, subjects, medianTotal }: { title: string; s
   );
 }
 
-type PendingResume = { href: string; label: string; kind: "mock" | "subject"; subject: string | null } | null;
+type PendingResume = {
+  href: string;
+  label: string;
+  kind: "mock" | "subject";
+  subject: string | null;
+  part: "common" | "specialized" | null;
+} | null;
+
+const ALLSUBJECTS_PART_LABEL: Record<"common" | "specialized", string> = { common: "共通", specialized: "専門" };
 
 // 全科目演習・科目別演習はどちらも独自にlocalStorageへ進行中セッションを保存していて
 // （それぞれのページ内で「続きから再開しますか？」を出す）、ホーム画面はそれとは別に
@@ -308,23 +322,27 @@ type PendingResume = { href: string; label: string; kind: "mock" | "subject"; su
 // 「unfinished」判定と揃える（キーやフィールド名が変わったら両方直すこと）
 function checkPendingResume(): PendingResume {
   if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(profileScopedKey("quiz_session_allsubjects_v1"));
-    if (raw) {
-      const p = JSON.parse(raw) as { answers?: Record<string, unknown>; subjectOrder?: string[] };
-      const answered = Object.keys(p.answers ?? {}).length;
-      const total = (p.subjectOrder ?? []).length;
-      if (total > 0 && answered < total) {
-        return {
-          href: "/quiz?mode=mock",
-          label: `全科目演習（${answered}/${total}問まで解答済み）`,
-          kind: "mock",
-          subject: null,
-        };
+  // 全科目演習は共通科目/専門科目それぞれ独立したセッションを持つ（web/app/(main)/quiz/AllSubjectsQuiz.tsx参照）
+  for (const part of ["common", "specialized"] as const) {
+    try {
+      const raw = localStorage.getItem(profileScopedKey(`quiz_session_allsubjects_v2_${part}`));
+      if (raw) {
+        const p = JSON.parse(raw) as { answers?: Record<string, unknown>; subjectOrder?: string[] };
+        const answered = Object.keys(p.answers ?? {}).length;
+        const total = (p.subjectOrder ?? []).length;
+        if (total > 0 && answered < total) {
+          return {
+            href: `/quiz?mode=mock&part=${part}`,
+            label: `全科目演習（${ALLSUBJECTS_PART_LABEL[part]}科目・${answered}/${total}問まで解答済み）`,
+            kind: "mock",
+            subject: null,
+            part,
+          };
+        }
       }
+    } catch {
+      // 壊れたデータは無視する
     }
-  } catch {
-    // 壊れたデータは無視する
   }
   try {
     const raw = localStorage.getItem(profileScopedKey("quiz_session_subject_v1"));
@@ -338,6 +356,7 @@ function checkPendingResume(): PendingResume {
           label: `科目別演習「${p.subject}」（${answered}/${count}問まで解答済み）`,
           kind: "subject",
           subject: p.subject,
+          part: null,
         };
       }
     }
@@ -373,7 +392,7 @@ export default function Dashboard() {
     const pendingQuery = pending
       ? `&pendingKind=${pending.kind}&pendingLabel=${encodeURIComponent(pending.label)}${
           pending.subject ? `&pendingSubject=${encodeURIComponent(pending.subject)}` : ""
-        }`
+        }${pending.part ? `&pendingPart=${pending.part}` : ""}`
       : "";
     // まず状態のフィンガープリントだけを安く取得し、前回キャッシュ時と一致するなら
     // LLM呼び出し（/api/home/next-action）自体をスキップしてキャッシュをそのまま使う
@@ -456,6 +475,7 @@ export default function Dashboard() {
               <p className="text-lg font-bold">
                 {ACTION_LABEL[nextAction.action]}
                 {nextAction.targetSubject ? `：${nextAction.targetSubject}` : ""}
+                {nextAction.part ? `：${nextAction.part === "common" ? "共通科目" : "専門科目"}` : ""}
               </p>
               <p className="mt-0.5 text-sm text-indigo-50">{nextAction.reason}</p>
             </div>

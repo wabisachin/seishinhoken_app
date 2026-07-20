@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import type { Mode, Question } from "@/lib/types";
+import type { ExamPart } from "@/lib/examFormat";
 import { getStoredProfile, profileScopedKey } from "@/lib/profile";
 import AllSubjectsQuiz from "./AllSubjectsQuiz";
 import ExplanationList from "./ExplanationList";
@@ -915,7 +916,11 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
 function QuizRouter() {
   const params = useSearchParams();
   const mode = (params.get("mode") ?? "subject") as Mode;
-  if (mode === "mock") return <AllSubjectsQuiz />;
+  if (mode === "mock") {
+    const rawPart = params.get("part");
+    const initialPart: ExamPart | null = rawPart === "common" || rawPart === "specialized" ? rawPart : null;
+    return <AllSubjectsQuiz initialPart={initialPart} />;
+  }
   // ホーム画面の弱点マップから「この科目を今すぐ復習」で直接遷移してきた場合に使う
   // （復習モードの科目選択画面を経由せず、その科目の復習をそのまま開始する）
   const initialSubject = params.get("subject");

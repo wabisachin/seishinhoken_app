@@ -9,12 +9,22 @@ import { logError } from "./errorLog";
 import { getStockSnapshot, getExamReadyRounds } from "./questionSupply";
 import { getWrongStockProgress, getWrongStockProgressBySubject, getGardenSummary, GARDEN_MIN_ELIGIBLE } from "./reviewStock";
 import { countRoundsThisMonth, hasStartedRoundToday, computePartResult, computeVerdict, ExamAttemptRow } from "./examMode";
-import { describeFailedGroups, EXAM_MONTHLY_LIMIT, EXAM_SUBJECT_GROUPS, EXAM_ROUND_LABEL, daysUntilExam } from "./examFormat";
+import {
+  describeFailedGroups,
+  EXAM_MONTHLY_LIMIT,
+  EXAM_SUBJECT_GROUPS,
+  EXAM_SUBJECT_COUNTS,
+  EXAM_ROUND_LABEL,
+  daysUntilExam,
+  type ExamPart,
+} from "./examFormat";
 import { getPlanProgress } from "./monthlyPlan";
 
 export type NextAction = {
   action: "subject" | "review" | "mock" | "exam" | "garden";
   targetSubject: string | null;
+  // actionが"mock"（全科目演習）の場合のみ、共通科目/専門科目のどちらを勧めるかを持つ
+  part: ExamPart | null;
   reason: string;
   href: string;
 };
@@ -22,7 +32,11 @@ export type NextAction = {
 // ホーム画面（web/app/(main)/page.tsx）がlocalStorageから検出した「前回途中で終えた
 // 演習」の情報。サーバー側のこのファイルからはlocalStorageを直接読めないため、
 // クライアントからクエリパラメータ経由で渡してもらう
-export type PendingResumeInfo = { kind: "mock" | "subject"; subject: string | null; label: string };
+export type PendingResumeInfo = { kind: "mock" | "subject"; subject: string | null; part: ExamPart | null; label: string };
+
+function partOfSubject(subject: string): ExamPart | null {
+  return EXAM_SUBJECT_COUNTS.find((s) => s.subject === subject)?.part ?? null;
+}
 
 // 科目別演習/全科目演習の裏側のストック目標(questionSupply.tsのSTOCK_TARGET=5)を下回れば
 // 「薄い」とみなす目安。ちょうど同じ値だと補充中の一瞬でも毎回反応してしまうため、少し余裕を持たせる。
@@ -46,11 +60,15 @@ const NextActionSchema = z.object({
     .string()
     .nullable()
     .describe("actionがsubjectまたはreviewの場合のみ、提示された候補の中から科目名を1つそのまま指定する。それ以外はnull"),
+  part: z
+    .enum(["common", "specialized"])
+    .nullable()
+    .describe("actionがmockの場合のみ、共通科目(common)/専門科目(specialized)のどちらを優先すべきか指定する。それ以外はnull"),
   reason: z.string().describe("40字以内、1文。具体的な数字を1つ含めること。決まり文句の言い換えではなく状況に即した理由にする"),
 });
 
-function href(action: NextAction["action"], targetSubject: string | null): string {
-  if (action === "mock") return "/quiz?mode=mock";
+function href(action: NextAction["action"], targetSubject: string | null, part: ExamPart | null = null): string {
+  if (action === "mock") return `/quiz?mode=mock${part ? `&part=${part}` : ""}`;
   if (action === "exam") return "/full-mock";
   if (action === "garden") return "/quiz?mode=garden";
   if (action === "review") return `/quiz?mode=review${targetSubject ? `&subject=${encodeURIComponent(targetSubject)}` : ""}`;
@@ -254,7 +272,7 @@ async function gatherState(pendingResume: PendingResumeInfo | null, profile: str
   // 前回途中で終えた演習の有無・種類もフィンガープリントに含める。DB側の状態が
   // 何も変わっていなくても、ユーザーが演習を再開して離脱した/最後まで終えたなど
   // localStorageの状態だけが変化した場合に、キャッシュされた古い提案を使い回さないため
-  fingerprintParts.push(`pending:${pendingResume ? `${pendingResume.kind}:${pendingResume.subject ?? ""}` : "none"}`);
+  fingerprintParts.push(`pending:${pendingResume ? `${pendingResume.kind}:${pendingResume.subject ?? ""}:${pendingResume.part ?? ""}` : "none"}`);
   // 新しい月次振り返りレポートが発行された・記憶の庭が開放/非開放に切り替わった、
   // という変化もキャッシュ再計算のトリガーに含める（本番までの残り日数のような
   // 日次で必ず変わる値はここには含めない。上のexamDaysRemainingのコメント参照）。
@@ -349,11 +367,14 @@ export async function computeNextAction(
   // 矛盾するため、LLMの判断結果に関わらずこれを最終的な答えとして優先する
   function pendingResumeAction(): NextAction | null {
     if (!pendingResume) return null;
+    const targetSubject = pendingResume.kind === "subject" ? pendingResume.subject : null;
+    const part = pendingResume.kind === "mock" ? pendingResume.part : null;
     return {
       action: pendingResume.kind,
-      targetSubject: pendingResume.kind === "subject" ? pendingResume.subject : null,
+      targetSubject,
+      part,
       reason: `前回途中の${pendingResume.label}を終わらせましょう`,
-      href: href(pendingResume.kind, pendingResume.kind === "subject" ? pendingResume.subject : null),
+      href: href(pendingResume.kind, targetSubject, part),
     };
   }
 
@@ -362,22 +383,52 @@ export async function computeNextAction(
   const pendingAction = pendingResumeAction();
   if (pendingAction) return { ...pendingAction, stateHash };
 
+  // 共通科目(12科目)・専門科目(6科目)のうち、演習量が相対的に手薄な方を選ぶ。
+  // mockを提案する場面すべてで「どちらを勧めるか」を決めるのに使う共通ロジック
+  const partStats: Record<ExamPart, { total: number; count: number }> = {
+    common: { total: 0, count: 0 },
+    specialized: { total: 0, count: 0 },
+  };
+  for (const s of attemptCountsForPrompt) {
+    const p = partOfSubject(s.subject);
+    if (!p) continue;
+    partStats[p].total += s.count;
+    partStats[p].count += 1;
+  }
+  const partAvg = (p: ExamPart) => (partStats[p].count > 0 ? partStats[p].total / partStats[p].count : 0);
+  const weakerPart: ExamPart = partAvg("common") <= partAvg("specialized") ? "common" : "specialized";
+  // 特定の科目群（未挑戦・薄いストックなど）の中で、共通/専門のどちらに多く該当するかで
+  // 部分を選ぶ。同数ならweakerPart（全体の演習量で手薄な方）で決める
+  function pickPart(subjects: string[]): ExamPart {
+    const counts: Record<ExamPart, number> = { common: 0, specialized: 0 };
+    for (const s of subjects) {
+      const p = partOfSubject(s);
+      if (p) counts[p]++;
+    }
+    if (counts.common === counts.specialized) return weakerPart;
+    return counts.common > counts.specialized ? "common" : "specialized";
+  }
+
   function fallback(): NextAction {
     if (untouchedSubjects.length + lowConfidenceSubjects.length >= UNTOUCHED_THRESHOLD) {
       if (untouchedSubjects.length > 0) {
-        return { action: "mock", targetSubject: null, reason: `まだ${untouchedSubjects.length}科目手つかずです`, href: href("mock", null) };
+        const part = pickPart(untouchedSubjects);
+        return { action: "mock", targetSubject: null, part, reason: `まだ${untouchedSubjects.length}科目手つかずです`, href: href("mock", null, part) };
       }
+      const part = pickPart(lowConfidenceSubjects);
       return {
         action: "mock",
         targetSubject: null,
+        part,
         reason: `問題数が少なく判断できない科目が${lowConfidenceSubjects.length}件あります`,
-        href: href("mock", null),
+        href: href("mock", null, part),
       };
     }
     if (weakestInFailedGroup) {
       return {
         action: "subject",
         targetSubject: weakestInFailedGroup,
+        part: null,
         reason: `前回0点だった科目群の「${weakestInFailedGroup}」を優先しましょう`,
         href: href("subject", weakestInFailedGroup),
       };
@@ -387,12 +438,14 @@ export async function computeNextAction(
       return {
         action: "subject",
         targetSubject: w.subject,
+        part: null,
         reason: `実戦模試の${w.subject}正答率が${Math.round(w.accuracy * 100)}%です`,
         href: href("subject", w.subject),
       };
     }
     if (thinSubjects.length > 0) {
-      return { action: "mock", targetSubject: null, reason: `ストックが薄い科目が${thinSubjects.length}件あります`, href: href("mock", null) };
+      const part = pickPart(thinSubjects);
+      return { action: "mock", targetSubject: null, part, reason: `ストックが薄い科目が${thinSubjects.length}件あります`, href: href("mock", null, part) };
     }
     if (weakSubjects.length > 0) {
       const w = weakSubjects[0];
@@ -401,7 +454,7 @@ export async function computeNextAction(
       // 既にREVIEW_BACKLOG_SATURATION問以上溜まっている場合は、薄い科目であっても
       // 新規問題をこれ以上増やさず、復習で消化することを優先する
       const action = w.thin && w.currentWrong < REVIEW_BACKLOG_SATURATION ? "subject" : "review";
-      return { action, targetSubject: w.subject, reason: `${w.subject}が残り${w.currentWrong}問です`, href: href(action, w.subject) };
+      return { action, targetSubject: w.subject, part: null, reason: `${w.subject}が残り${w.currentWrong}問です`, href: href(action, w.subject) };
     }
     if (underPracticedSubjects.length > 0) {
       // 未挑戦・データ不足・苦手・実戦模試弱点のいずれも無く、単に全体的な母数を
@@ -409,23 +462,31 @@ export async function computeNextAction(
       // 未出題ストック(questionSupply.tsのSTOCK_TARGET=5)をすぐ食い潰してしまい、
       // ライブ生成待ち(20〜60秒)を連発させてユーザーを待たせる。全科目演習なら
       // 18科目に負荷が分散し、どこかしらに在庫がある確率が高いため待たせにくい。
+      const part = pickPart(underPracticedSubjects);
       return {
         action: "mock",
         targetSubject: null,
+        part,
         reason: `演習量が少なめの科目が${underPracticedSubjects.length}件、全体を底上げしましょう`,
-        href: href("mock", null),
+        href: href("mock", null, part),
       };
     }
     if (examFeasible) {
-      return { action: "exam", targetSubject: null, reason: "実力を試すタイミングです", href: href("exam", null) };
+      return { action: "exam", targetSubject: null, part: null, reason: "実力を試すタイミングです", href: href("exam", null) };
     }
-    return { action: "mock", targetSubject: null, reason: "演習を続けましょう", href: href("mock", null) };
+    return { action: "mock", targetSubject: null, part: weakerPart, reason: "演習を続けましょう", href: href("mock", null, weakerPart) };
   }
+
+  // 共通科目(12科目)・専門科目(6科目)それぞれの平均解答数。mockを選ぶ際にLLMがどちらを
+  // 優先すべきか判断する材料にする（fallback()のpickPart/weakerPartと同じ考え方）
+  const partAvgText = (["common", "specialized"] as const)
+    .map((p) => `${p === "common" ? "共通科目" : "専門科目"}(${partStats[p].count}科目)平均${partAvg(p).toFixed(1)}問`)
+    .join("、");
 
   const feasibleActionsText = [
     "- subject: 科目別演習（対象科目を1つ指定。新しい問題で演習する）",
     "- review: 復習モード（対象科目を1つ指定。過去に間違えて、まだ克服できていない問題だけを解き直す）",
-    "- mock: 全科目演習（全科目を1問ずつ横断。手薄な科目を広く埋める・ストックを増やす）",
+    "- mock: 全科目演習（共通科目12科目または専門科目6科目のどちらかを1問ずつ横断。partに\"common\"か\"specialized\"を必ず指定すること。手薄な科目を広く埋める・ストックを増やす）",
     examFeasible ? "- exam: 実戦模試（本番同形式・未出題の問題だけで力試し）" : null,
     gardenFeasible ? "- garden: 記憶の庭（克服済みだが1カ月以上前に克服した、忘れかけている問題の再テスト）" : null,
   ]
@@ -474,6 +535,12 @@ ${attemptCountsText || "データ無し"}
 → 全${attemptCountsForPrompt.length}科目中${belowThresholdCount}科目がまだ30問未満です。この数が多いほど、
 「まだ全体の判断材料が不足している」という状況が裏付けられるため、mockでの底上げを優先する
 判断を強めてください。
+
+# 共通科目/専門科目別の平均解答数（mockを選ぶ場合にpartをどちらにすべきかの判断材料）
+${partAvgText}
+mockを選ぶ場合、原則として平均解答数が少ない方のpartを指定してください。ただし上記の
+「まだ一度も演習していない科目」「問題数が少なく判断できない科目」「ストックが薄い科目」の
+一覧に特定のpartの科目が偏って多く含まれている場合は、そちらを優先してください。
 
 # 選べる行動（このリストにあるものだけから選ぶこと）
 ${feasibleActionsText}
@@ -539,12 +606,17 @@ ${planLines ? `${planLines}（進捗 ${planProgress?.doneTotal ?? 0}/${planProgr
       return {
         action: object.action,
         targetSubject: object.targetSubject,
+        part: null,
         reason: object.reason,
         href: href(object.action, object.targetSubject),
         stateHash,
       };
     }
-    return { action: object.action, targetSubject: null, reason: object.reason, href: href(object.action, null), stateHash };
+    if (object.action === "mock") {
+      if (object.part !== "common" && object.part !== "specialized") return { ...fallback(), stateHash };
+      return { action: "mock", targetSubject: null, part: object.part, reason: object.reason, href: href("mock", null, object.part), stateHash };
+    }
+    return { action: object.action, targetSubject: null, part: null, reason: object.reason, href: href(object.action, null), stateHash };
   } catch (e) {
     await logError("next-action", e);
     return { ...fallback(), stateHash };

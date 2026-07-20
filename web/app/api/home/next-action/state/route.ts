@@ -7,7 +7,9 @@ function parsePendingResume(searchParams: URLSearchParams): PendingResumeInfo | 
   const kind = searchParams.get("pendingKind");
   const label = searchParams.get("pendingLabel");
   if ((kind !== "mock" && kind !== "subject") || !label) return null;
-  return { kind, subject: searchParams.get("pendingSubject"), label };
+  const rawPart = searchParams.get("pendingPart");
+  const part = rawPart === "common" || rawPart === "specialized" ? rawPart : null;
+  return { kind, subject: searchParams.get("pendingSubject"), part, label };
 }
 
 /**
