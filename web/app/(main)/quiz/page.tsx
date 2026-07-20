@@ -176,6 +176,14 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
     };
   }, []);
 
+  // 問題・解説の切り替わり（次の問題へ進む／解答して解説を表示する）のたびに、必ず
+  // ページ先頭から読み始められるようにする。個々のsubmit()/next()呼び出し側で
+  // scrollToTop()を呼び忘れる経路が生まれないよう、表示中のphase・問題インデックスの
+  // 変化そのものをトリガーにする一元的な仕組みにしている。
+  useEffect(() => {
+    if (phase === "answering" || phase === "explaining") scrollToTop();
+  }, [phase, index]);
+
   // 分野別モードのみ: 前回途中だったセッションが無いか起動時に確認する
   useEffect(() => {
     if (mode !== "subject") return;
@@ -381,7 +389,6 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
     const nextRecords = [...records, { question: q, selected, isCorrect: d.is_correct as boolean }];
     setRecords(nextRecords);
     setPhase("explaining");
-    scrollToTop();
     if (mode === "subject") {
       saveSubjectSession({
         subject,
@@ -396,7 +403,6 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
   }
 
   async function next() {
-    scrollToTop();
     if (mode === "subject") {
       if (records.length >= count) {
         clearSubjectSession();

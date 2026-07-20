@@ -97,6 +97,16 @@ export default function ExamQuiz() {
     void loadHistory();
   }, []);
 
+  // 分野(page)の切り替わり・解答結果の表示のたびに、必ずページ先頭から読み始められる
+  // ようにする。個々の呼び出し側でscrollToTop()を呼び忘れる経路が生まれないよう、
+  // 表示中のphase・分野ページ・結果オブジェクトの変化そのものをトリガーにする一元的な
+  // 仕組みにしている（web/app/(main)/quiz/page.tsxと同じ考え方）。verdict/partResultは
+  // 呼び出しのたびに新しいオブジェクト参照になるため、内容が同じでも再表示のたびに
+  // 確実に発火する。remainingSecondsは毎秒変わるため意図的に依存配列に含めない。
+  useEffect(() => {
+    if (phase === "answering" || phase === "part-result" || phase === "final-result") scrollToTop();
+  }, [phase, page, verdict, partResult]);
+
   async function openHistoryDetail(entry: HistoryEntry, roundNumber: number) {
     setError(null);
     setPhase("starting");
@@ -109,7 +119,6 @@ export default function ExamQuiz() {
       setExpandedSubject(null);
       setViewingHistoryLabel(`第${roundNumber}回（${new Date(entry.completedAt).toLocaleDateString("ja-JP")}受験）`);
       setPhase("final-result");
-      scrollToTop();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setPhase("error");
@@ -181,7 +190,6 @@ export default function ExamQuiz() {
       return;
     }
     setPhase("answering");
-    scrollToTop();
   }
 
   // 残り時間のカウントダウン。0になったら自動的に提出する
@@ -264,7 +272,6 @@ export default function ExamQuiz() {
       const nextPage = page + 1;
       setPage(nextPage);
       setDraft({});
-      scrollToTop();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -297,7 +304,6 @@ export default function ExamQuiz() {
       } else {
         setPhase("part-result");
       }
-      scrollToTop();
       void loadState();
       void loadHistory();
     } catch (e) {

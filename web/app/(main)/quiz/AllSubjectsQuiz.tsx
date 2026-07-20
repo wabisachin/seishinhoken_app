@@ -68,14 +68,23 @@ async function fetchOneQuestion(subject: string, onAttempt: ((n: number) => void
   throw new Error(`「${subject}」の出題準備に時間がかかりすぎています。時間をおいて再度お試しください。`);
 }
 
+/** Fisher-Yatesシャッフル。破壊的変更を避けるため新しい配列を返す。 */
+function shuffleArray<T>(items: T[]): T[] {
+  const arr = [...items];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
 async function fetchSubjectOrder(): Promise<string[]> {
   const res = await fetch("/api/subjects");
   const d = await res.json();
   const subjects = (d.subjects ?? []) as { subject: string; kind: string | null; taxonomy_items: number }[];
-  return subjects
-    .filter((s) => s.taxonomy_items > 0)
-    .sort((a, b) => a.subject.localeCompare(b.subject, "ja"))
-    .map((s) => s.subject);
+  // 毎回同じ（五十音順の）並びで出題すると、後半の科目ばかり時間切れ・後回しになりがちで
+  // 単調にもなるため、演習を始めるたびにシャッフルして出題順を変える
+  return shuffleArray(subjects.filter((s) => s.taxonomy_items > 0).map((s) => s.subject));
 }
 
 type Phase = "checking" | "resume-prompt" | "loading" | "generating" | "answering" | "explaining" | "done" | "empty";
@@ -138,6 +147,14 @@ export default function AllSubjectsQuiz() {
       cancelledRef.current = true;
     };
   }, []);
+
+  // セットの切り替わり（解答して解説を表示する／次のセットへ進む）のたびに、必ず
+  // ページ先頭から読み始められるようにする。個々のsubmitSet()/nextSet()呼び出し側で
+  // scrollToTop()を呼び忘れる経路が生まれないよう、表示中のphase・セット番号の変化
+  // そのものをトリガーにする一元的な仕組みにしている（web/app/(main)/quiz/page.tsxと同じ考え方）。
+  useEffect(() => {
+    if (phase === "answering" || phase === "explaining") scrollToTop();
+  }, [phase, setIndex]);
 
   useEffect(() => {
     const persisted = loadPersisted();
@@ -253,7 +270,6 @@ export default function AllSubjectsQuiz() {
       setAnswers(nextAnswers);
       savePersisted({ subjectOrder, questions, answers: nextAnswers, setIndex, phase: "explaining", savedAt: Date.now() });
       setPhase("explaining");
-      scrollToTop();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -289,7 +305,6 @@ export default function AllSubjectsQuiz() {
       setDraft({});
       savePersisted({ subjectOrder, questions: nextQuestions, answers, setIndex: nextIndex, phase: "answering", savedAt: Date.now() });
       setPhase("answering");
-      scrollToTop();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setPhase("explaining");
