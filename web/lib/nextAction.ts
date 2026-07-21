@@ -691,7 +691,7 @@ ${planLines ? `${planLines}（進捗 ${planProgress?.doneTotal ?? 0}/${planProgr
     // （品質重視で選ばれていることが多い）とは別に、固定の低コストモデルを使う。
     // admin設定を経由させないのは、このためだけに新しい管理設定を追加するほどの
     // 複雑さに見合わないため（変更したくなったら、ここの定数を直接変えればよい）。
-    const llm = { provider: "openai" as const, model: "gpt-5.4-nano" };
+    const llm = { provider: "openai" as const, model: "gpt-5.6-luna" };
     const model = getModel(llm);
     const { object, usage } = await generateObject({ model, schema: NextActionSchema, prompt });
     await logUsage({ source: "next-action", provider: llm.provider, model: llm.model, usage });
