@@ -67,6 +67,29 @@ function saveCachedNextAction(action: NextActionCache) {
   localStorage.setItem(profileScopedKey(NEXT_ACTION_CACHE_KEY), JSON.stringify(action));
 }
 
+// LLMが実際に計算した（キャッシュ再利用ではない）直近の提案の履歴。次の一手のLLMに
+// 「同じ提案を連発していないか」を判断させるための材料として渡す（lib/nextAction.tsの
+// 「毎回判で押したように同じ提案ばかり」対策を、実際に履歴を見て判断できるようにする）。
+// 専用のDBテーブルを新設せずlocalStorageに置いているのは、この用途がソフトなヒントに
+// 過ぎず、端末をまたいだ厳密な一貫性までは要らないため
+const RECENT_ACTIONS_KEY = "home_next_action_recent_v1";
+const MAX_RECENT_ACTIONS = 5;
+type RecentActionEntry = { action: NextAction["action"]; targetSubject: string | null; part: "common" | "specialized" | null };
+
+function loadRecentActions(): RecentActionEntry[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(profileScopedKey(RECENT_ACTIONS_KEY));
+    return raw ? (JSON.parse(raw) as RecentActionEntry[]) : [];
+  } catch {
+    return [];
+  }
+}
+function pushRecentAction(entry: RecentActionEntry) {
+  const next = [...loadRecentActions(), entry].slice(-MAX_RECENT_ACTIONS);
+  localStorage.setItem(profileScopedKey(RECENT_ACTIONS_KEY), JSON.stringify(next));
+}
+
 function formatMonth(month: string) {
   const [y, m] = month.split("-");
   return `${y}年${parseInt(m, 10)}月`;
@@ -410,12 +433,17 @@ export default function Dashboard() {
           setNextAction(cached);
           return;
         }
-        return fetch(`/api/home/next-action?${profileQuery}${pendingQuery}`)
+        // 実際にLLMを呼ぶ回だけ、直近の提案履歴（同じ提案の連発を避けるための材料）を渡す。
+        // ここでの履歴は「これまでLLMが計算した回」のみで、キャッシュ再利用（上のreturn）は
+        // 含めない ── 含めると同じ提案が続いている実態を過小評価してしまうため
+        const recentQuery = `&recentActions=${encodeURIComponent(JSON.stringify(loadRecentActions()))}`;
+        return fetch(`/api/home/next-action?${profileQuery}${pendingQuery}${recentQuery}`)
           .then((r) => r.json())
           .then((fresh) => {
             if (!fresh.error) {
               setNextAction(fresh as NextActionCache);
               saveCachedNextAction(fresh as NextActionCache);
+              pushRecentAction({ action: fresh.action, targetSubject: fresh.targetSubject, part: fresh.part });
             }
           });
       })

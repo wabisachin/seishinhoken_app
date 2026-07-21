@@ -2,26 +2,50 @@
 
 import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-// 忘却曲線（エビングハウスの忘却曲線の考え方に基づく、実データではないイメージ図）。
-// 「復習しない場合」は指数関数的に記憶保持率が下がり続けるが、「想起の庭で復習した場合」は
-// 克服から14日後（想起の庭の対象になるタイミング）に思い出す機会があることで、その後の
-// 減衰が緩やかになる ── という想起の庭の設計思想を視覚的に示す。
+// エビングハウスの忘却曲線の実験値（節約法による保持率。Ebbinghaus (1885)、および
+// Murre & Dros (2015, PLOS ONE)による追試で報告されている代表的な数値）。
+// 「復習しない場合」はこの実測値そのものを使う（区間の間は直線補間のみで、新しい値の
+// 創作はしていない）。「想起の庭で復習した場合」は、想起の庭の対象になる14日後に
+// 想起（正解）できたと仮定し、その時点で同じ忘却カーブが再び最初から始まる、という
+// 想起の庭の設計思想を示すためのイメージであり、実測データではない。
 const REVIEW_DAY = 14;
 
-function withoutReview(day: number): number {
-  return Math.round(100 * Math.exp(-day / 12));
-}
-function withReview(day: number): number {
-  if (day <= REVIEW_DAY) return Math.round(100 * Math.exp(-day / 12));
-  const daysSinceReview = day - REVIEW_DAY;
-  const retentionAtReview = 90; // 復習によって記憶が呼び戻される
-  return Math.round(retentionAtReview * Math.exp(-daysSinceReview / 30));
+// day: 経過日数（20分・1時間・9時間は日に換算）, retention: 保持率(%)の実測値
+const REAL_FORGETTING_POINTS: { day: number; retention: number }[] = [
+  { day: 0, retention: 100 },
+  { day: 20 / 1440, retention: 58 }, // 20分後
+  { day: 1 / 24, retention: 44 }, // 1時間後
+  { day: 9 / 24, retention: 36 }, // 9時間後
+  { day: 1, retention: 34 }, // 1日後
+  { day: 2, retention: 28 }, // 2日後
+  { day: 6, retention: 25 }, // 6日後
+  { day: 31, retention: 21 }, // 31日後
+];
+
+/** 実測値どうしの直線補間のみ（区間外は最初/最後の実測値で頭打ち）。新しい数値の創作はしない。 */
+function withoutReviewAt(day: number): number {
+  if (day <= 0) return 100;
+  for (let i = 1; i < REAL_FORGETTING_POINTS.length; i++) {
+    const prev = REAL_FORGETTING_POINTS[i - 1];
+    const cur = REAL_FORGETTING_POINTS[i];
+    if (day <= cur.day) {
+      const ratio = (day - prev.day) / (cur.day - prev.day);
+      return prev.retention + (cur.retention - prev.retention) * ratio;
+    }
+  }
+  return REAL_FORGETTING_POINTS[REAL_FORGETTING_POINTS.length - 1].retention;
 }
 
-const data = Array.from({ length: 61 }, (_, day) => ({
+function withReviewAt(day: number): number {
+  if (day <= REVIEW_DAY) return withoutReviewAt(day);
+  return withoutReviewAt(day - REVIEW_DAY);
+}
+
+const CHART_MAX_DAY = 31;
+const data = Array.from({ length: CHART_MAX_DAY + 1 }, (_, day) => ({
   day,
-  withoutReview: withoutReview(day),
-  withReview: withReview(day),
+  withoutReview: Math.round(withoutReviewAt(day)),
+  withReview: Math.round(withReviewAt(day)),
 }));
 
 const SERIES_LABEL: Record<string, string> = {
@@ -52,7 +76,10 @@ export default function ForgettingCurve() {
           <Line type="monotone" dataKey="withReview" stroke="#059669" strokeWidth={2} dot={false} />
         </LineChart>
       </ResponsiveContainer>
-      <p className="mt-1 text-center text-xs text-stone-400">※ 忘却曲線の考え方に基づくイメージ図（実データではありません）</p>
+      <p className="mt-1 text-center text-xs text-stone-400">
+        ※「復習しない場合」はエビングハウスの実験値（節約法）。「想起の庭で復習した場合」は同じ曲線を
+        14日後に再適用したイメージ図で、実測データではありません
+      </p>
     </div>
   );
 }

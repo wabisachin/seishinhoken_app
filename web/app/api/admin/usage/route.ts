@@ -11,14 +11,38 @@ type UsageRow = {
   cost_usd: number;
 };
 
+// SupabaseのREST API（PostgREST）は明示的なrangeを指定しない場合、既定で最大1000件しか
+// 返さない。llm_usageは呼び出しのたびに増え続けるテーブルのため、行数が1000件を超えると
+// 集計対象が古い（またはある時点までの）1000件に固定されてしまい、それ以降の利用量が
+// 管理画面の集計に一切反映されなくなる不具合があった（実際に4000件超まで積み上がっており、
+// 表示上の使用量が本当の使用量から大きく乖離していた）。ページングして全件を取得する。
+async function fetchAllUsageRows(): Promise<UsageRow[]> {
+  const PAGE_SIZE = 1000;
+  const rows: UsageRow[] = [];
+  for (let offset = 0; ; offset += PAGE_SIZE) {
+    const { data, error } = await supabase()
+      .from("llm_usage")
+      .select("provider, model, input_tokens, cached_input_tokens, output_tokens, cost_usd")
+      .order("id", { ascending: true })
+      .range(offset, offset + PAGE_SIZE - 1);
+    if (error) throw new Error(error.message);
+    const page = (data ?? []) as UsageRow[];
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) break;
+  }
+  return rows;
+}
+
 export async function GET(req: NextRequest) {
   if (!isAdminRequest(req)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const { data, error } = await supabase()
-    .from("llm_usage")
-    .select("provider, model, input_tokens, cached_input_tokens, output_tokens, cost_usd");
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  const rows = (data ?? []) as UsageRow[];
+  let rows: UsageRow[];
+  try {
+    rows = await fetchAllUsageRows();
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 
   const totals = rows.reduce(
     (acc, r) => {
