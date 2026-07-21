@@ -265,21 +265,44 @@ function WeaknessRow({ s, medianTotal }: { s: ReviewSubject; medianTotal: number
     <div>
       {row}
       {showModeChoice && (
-        <div className="mt-1 flex flex-wrap gap-2">
-          <Link
-            href={`/quiz?mode=subject&subject=${subjectQuery}`}
-            className="min-h-9 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-700"
-          >
-            📝 科目別演習で始める
-          </Link>
-          {s.wrongCount > 0 && (
-            <Link
-              href={`/quiz?mode=review&subject=${subjectQuery}`}
-              className="min-h-9 rounded-lg border border-amber-500 px-3 py-1.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-50"
-            >
-              🔁 復習モードで始める（残り{s.wrongCount}問）
-            </Link>
-          )}
+        // 全科目演習の「共通科目/専門科目」選択画面と同じカードデザインを踏襲しつつ、
+        // あちらはページ遷移だがこちらはダッシュボードから離れずポップアップで完結させる
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+          onClick={() => setShowModeChoice(false)}
+        >
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-warm-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="font-bold text-stone-800">{s.subject}</h3>
+              <button
+                type="button"
+                onClick={() => setShowModeChoice(false)}
+                aria-label="閉じる"
+                className="shrink-0 text-lg leading-none text-stone-400 hover:text-stone-600"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-stone-500">どちらのモードで始めますか？</p>
+            <div className="mt-4 space-y-3">
+              <Link
+                href={`/quiz?mode=subject&subject=${subjectQuery}`}
+                className="block rounded-2xl border-l-4 border-indigo-400 bg-white p-4 text-left shadow-warm-sm transition-all hover:-translate-y-0.5 hover:shadow-warm"
+              >
+                <p className="font-bold text-indigo-700">📝 科目別演習</p>
+                <p className="mt-1 text-xs text-stone-600">1問ずつ、即時採点・解説つきで解きます</p>
+              </Link>
+              {s.wrongCount > 0 && (
+                <Link
+                  href={`/quiz?mode=review&subject=${subjectQuery}`}
+                  className="block rounded-2xl border-l-4 border-amber-400 bg-white p-4 text-left shadow-warm-sm transition-all hover:-translate-y-0.5 hover:shadow-warm"
+                >
+                  <p className="font-bold text-amber-700">🔁 復習モード</p>
+                  <p className="mt-1 text-xs text-stone-600">間違えたまま残っている{s.wrongCount}問を優先的に再出題します</p>
+                </Link>
+              )}
+            </div>
+          </div>
         </div>
       )}
       {showDetail && (
@@ -664,8 +687,9 @@ export default function Dashboard() {
             <span className="text-xs font-normal text-stone-400">全体の問題数計{totalAnsweredOverall}問</span>
           </h2>
           <p className="mb-3 text-xs text-stone-400">
-            演習問題数が少ない科目（問題数プールがまだ十分に確保できていない）は科目別演習、問題数が十分で間違えた
-            問題が残っている科目は復習モードが始まります。ⓘで問題数・克服数を確認できます。
+            科目をタップすると、科目別演習・復習モードのどちらで始めるか選べます。演習問題数が少ない科目
+            （問題数プールがまだ十分に確保できていない）は科目別演習、間違えた問題が残っている科目は
+            復習モードがおすすめです。ⓘで問題数・克服数を確認できます。
           </p>
           <div className="space-y-5">
             <WeaknessMapSection title="共通科目" subjects={commonSubjects} medianTotal={medianTotal} />
