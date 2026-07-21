@@ -493,11 +493,24 @@ export async function computeNextAction(
         href: href("subject", target.subject),
       };
     }
+    if (weakSubjects.length > 0) {
+      const w = weakSubjects[0];
+      // 間違えたまま残っている問題が多い苦手科目トップ3は、想起の庭（克服済みで
+      // 忘れかけている問題の再確認）より優先度を上げる。合格基準に直結するのは
+      // 「今も間違えている問題」を潰すことであり、想起の庭は克服済みの内容の
+      // 定着度を確認する補助的な位置づけのため
+      // 解答数が薄い科目は、間違いが残っていても復習ではなく科目別演習を勧める
+      // （まだ見つかっていない弱点が多く残っている可能性が高いため）。ただし復習ストックが
+      // 既にREVIEW_BACKLOG_SATURATION問以上溜まっている場合は、薄い科目であっても
+      // 新規問題をこれ以上増やさず、復習で消化することを優先する
+      const action = w.thin && w.currentWrong < REVIEW_BACKLOG_SATURATION ? "subject" : "review";
+      return { action, targetSubject: w.subject, part: null, reason: `${w.subject}が残り${w.currentWrong}問です`, href: href(action, w.subject) };
+    }
     if (gardenFeasible) {
       // 想起の庭（克服済みだが忘れかけている問題の再テスト）は、未挑戦・実戦模試の
-      // 弱点・ストック不足という「まだ実力を把握できていない/整えられていない」段階の
-      // 対応より優先度は下げるが、間違えたまま残っている問題をひたすら復習で潰す
-      // （weakSubjects）より先に、忘れかけている既知の内容を定着させることを優先する
+      // 弱点・ストック不足・苦手科目トップ3という「今も間違えている/実力を把握
+      // できていない」段階の対応より優先度は下げる（克服済みの内容の定着確認は
+      // 現在進行中の弱点解消より緊急性が低いため）
       return {
         action: "garden",
         targetSubject: null,
@@ -505,15 +518,6 @@ export async function computeNextAction(
         reason: `想起の庭の対象が${gardenSummary.eligibleCount}問あります`,
         href: href("garden", null),
       };
-    }
-    if (weakSubjects.length > 0) {
-      const w = weakSubjects[0];
-      // 解答数が薄い科目は、間違いが残っていても復習ではなく科目別演習を勧める
-      // （まだ見つかっていない弱点が多く残っている可能性が高いため）。ただし復習ストックが
-      // 既にREVIEW_BACKLOG_SATURATION問以上溜まっている場合は、薄い科目であっても
-      // 新規問題をこれ以上増やさず、復習で消化することを優先する
-      const action = w.thin && w.currentWrong < REVIEW_BACKLOG_SATURATION ? "subject" : "review";
-      return { action, targetSubject: w.subject, part: null, reason: `${w.subject}が残り${w.currentWrong}問です`, href: href(action, w.subject) };
     }
     if (underPracticedSubjects.length > 0) {
       // 未挑戦・データ不足・苦手・実戦模試弱点・想起の庭のいずれも無く、他の科目に
@@ -652,15 +656,6 @@ ${planLines ? `${planLines}（進捗 ${planProgress?.doneTotal ?? 0}/${planProgr
   subjectで直接指定してください。その科目を訪れること自体がストック補充のトリガーに
   なります。一方、特に少ない科目が${UNTOUCHED_THRESHOLD}件以上と広範囲に及ぶ場合は、
   特定科目の問題ではなく全体的な傾向とみなし、1科目に絞らずmockで広く底上げしてください）
-- 想起の庭（克服済みだが2週間以上前に克服し忘れかけている問題の再テスト）: ${
-    gardenFeasible
-      ? `対象${gardenSummary.eligibleCount}問、前回実施は${gardenSummary.lastPlayedAt ? new Date(gardenSummary.lastPlayedAt).toLocaleDateString("ja-JP") : "未実施"}`
-      : `対象${gardenSummary.eligibleCount}/${GARDEN_MIN_ELIGIBLE}問でまだ選べません`
-  }
-- 想起の庭の優先度: 未挑戦・実戦模試の弱点・ストック不足のいずれも無く対象問題がある場合は、
-  積極的にgardenを提案してください。忘れかけている既知の内容を定着させる価値は、
-  下の「間違えたまま残っている問題をひたすら復習で潰す」ことより優先度が高いです。
-  ただし毎回連続で提案すると単調になるため、直近で実施済みなら他の選択肢を優先しても構いません
 - 今も間違えたまま残っている問題: 全体で${wrongProgress.currentWrong}問（これまで間違えた${wrongProgress.everMissed}問中）
 - 苦手科目トップ3（演習中、間違えたまま残っている問題が多い順）: ${weakSubjects.length > 0 ? weakSubjects.slice(0, 3).map((s) => `${s.subject}(残り${s.currentWrong}問${s.thin ? "・問題数少" : ""})`).join("、") : "無し"}
 - 苦手科目トップ3の対応方法: 問題数が「少」と付いている科目は、間違いが残っていても
@@ -671,6 +666,16 @@ ${planLines ? `${planLines}（進捗 ${planProgress?.doneTotal ?? 0}/${planProgr
   以上溜まっている場合は例外で、actionはsubjectではなくreviewにしてください
   （復習が積み上がりすぎるとユーザーのやる気を削ぐため、これ以上新規問題を増やさず
   既存の復習ストックを消化することを優先する）
+- 想起の庭（克服済みだが2週間以上前に克服し忘れかけている問題の再テスト）: ${
+    gardenFeasible
+      ? `対象${gardenSummary.eligibleCount}問、前回実施は${gardenSummary.lastPlayedAt ? new Date(gardenSummary.lastPlayedAt).toLocaleDateString("ja-JP") : "未実施"}`
+      : `対象${gardenSummary.eligibleCount}/${GARDEN_MIN_ELIGIBLE}問でまだ選べません`
+  }
+- 想起の庭の優先度: 未挑戦・実戦模試の弱点・ストック不足・苦手科目トップ3のいずれも
+  無く対象問題がある場合に、gardenを提案してください。克服済みの内容の定着確認は、
+  上の「今も間違えたまま残っている問題を復習で潰す」ことより優先度が低いです
+  （合格基準に直結するのは今も間違えている問題の解消のため）。ただし毎回連続で
+  提案すると単調になるため、直近で実施済みなら他の選択肢を優先しても構いません
 - 判定材料は十分(${CONFIDENCE_THRESHOLD}問以上)だが、他の科目に比べて問題数が相対的に
   少ない科目: ${underPracticedSubjects.length > 0 ? underPracticedSubjects.slice(0, 5).join("、") : "無し"}
   （未挑戦・データ不足・苦手科目・実戦模試での弱点・想起の庭のいずれも無い場合が対象。
