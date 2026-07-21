@@ -754,14 +754,18 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
   // --- 結果画面 ---
   if (phase === "finished") {
     const correct = records.filter((r) => r.isCorrect).length;
+    const pct = Math.round((100 * correct) / Math.max(records.length, 1));
     return (
       <div className="space-y-4">
-        <h1 className="text-xl font-bold">結果</h1>
+        <h1 className="text-xl font-bold">お疲れさまでした</h1>
         <div className="rounded-2xl bg-white p-6 text-center shadow-warm">
-          <p className="text-4xl font-bold text-indigo-700">
-            {correct} / {records.length}
+          <p className="text-3xl font-bold text-indigo-700">
+            {records.length}問中{correct}問正解
           </p>
-          <p className="mt-1 text-stone-600">正答率 {Math.round((100 * correct) / Math.max(records.length, 1))}%</p>
+          <p className="mt-1 text-sm text-stone-500">正答率{pct}%</p>
+          <p className="mt-3 text-sm text-stone-500">
+            間違えた問題は自動的に復習モードに追加されています。詳しい対応力の計測は実戦模試をご利用ください。
+          </p>
         </div>
         <div className="space-y-2">
           {records.map((r, i) => (
@@ -772,7 +776,7 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
             </div>
           ))}
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
           <button
             onClick={() => {
               setQuestions([]);
@@ -796,7 +800,7 @@ function QuizInner({ mode, initialSubject }: { mode: Mode; initialSubject?: stri
           >
             もう一度
           </button>
-          <Link href="/" className="inline-flex min-h-12 items-center rounded-xl border border-indigo-600 px-5 py-3 font-medium text-indigo-700 transition-colors hover:bg-indigo-50">
+          <Link href="/" className="inline-flex min-h-12 items-center justify-center rounded-xl border border-indigo-600 px-5 py-3 font-medium text-indigo-700 transition-colors hover:bg-indigo-50">
             ダッシュボードへ
           </Link>
         </div>

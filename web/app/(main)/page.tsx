@@ -633,9 +633,9 @@ export default function Dashboard() {
               <p className="mt-1 text-sm text-stone-500">
                 これまで間違えた{everMissed}問のうち{everMissed - totalWrong}問を克服済み（{consumedPercent}%消化）
               </p>
-              <p className="mt-1 text-xs text-stone-400">※同一の問題に正解すると克服したとみなします</p>
+              <p className="mt-1 text-xs text-stone-400">※復習で正解すると克服したとみなします</p>
               <p className="mt-1 text-xs text-emerald-600">
-                🌱 克服後2週間経つと「想起の庭」の対象になり、忘れた頃にもう一度出題されます（そこでも間違えると復習に戻ります）
+                🌱 克服後2週間経つと「想起の庭」の対象になり、忘れた頃にもう一度出題されます（そこで間違えると復習に戻ります）
               </p>
             </div>
           </div>
@@ -650,7 +650,7 @@ export default function Dashboard() {
             <span className="text-xs font-normal text-stone-400">全体の問題数計{totalAnsweredOverall}問</span>
           </h2>
           <p className="mb-3 text-xs text-stone-400">
-            未挑戦・問題数が少ない科目（ⓘが黄色）は科目別演習、問題数が十分で間違えた
+            演習問題数が少ない科目（問題数プールがまだ十分に確保できていない）は科目別演習、問題数が十分で間違えた
             問題が残っている科目は復習モードが始まります。ⓘで問題数・克服数を確認できます。
           </p>
           <div className="space-y-5">
