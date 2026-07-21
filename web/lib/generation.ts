@@ -7,13 +7,31 @@ import { getLlmSettings } from "./appSettings";
 import { logUsage } from "./usageLog";
 
 /**
- * プロンプトキャッシング対策: 同じ項目に対する生成1〜2回目・検証呼び出しは
- * 「指示文＋根拠チャンク」の部分が完全に同一バイト列になるようにし、これを
- * 常に固定のtext partとして先頭に置く（可変部分は必ず後ろに続ける）。
- * OpenAI/Geminiは同一の先頭バイト列を自動でキャッシュするためこれだけで効く。
- * Anthropicは明示的なcache_controlが無いとキャッシュされないため、
- * 対応プロバイダでのみ有効なproviderOptionsとして付与しておく
- * （他プロバイダは未知のproviderOptionsを無視するだけなので安全）。
+ * プロンプトキャッシング対策: 完全に項目非依存の指示文（毎回1バイトも変わらない部分）は
+ * 独立したsystemメッセージとして送る。OpenAIの暗黙キャッシュは「最新（＝最後）の
+ * メッセージの手前」に自動でキャッシュ境界を置く仕様のため、可変部分（根拠チャンク・
+ * 出題形式など）を含む1つのuserメッセージの中にすべてtext partとして詰め込んでいた
+ * 従来の実装では、キャッシュ境界がメッセージ内のtext part境界と一致せず、実質
+ * キャッシュされていなかった（実測でも生成・検証呼び出しの入力トークンキャッシュ率は
+ * 0.3%程度しかなく、この仮説と整合する）。systemメッセージとして分離すれば、
+ * 「最新メッセージ＝可変なuserメッセージ」の手前に来るsystemメッセージ全体が
+ * 安定したキャッシュ対象になる。Anthropicは明示的なcache_controlが無いと
+ * キャッシュされないため、対応プロバイダでのみ有効なproviderOptionsとして
+ * 付与しておく（他プロバイダは未知のproviderOptionsを無視するだけなので安全）。
+ */
+function systemCacheMessage(text: string) {
+  return {
+    role: "system" as const,
+    content: text,
+    providerOptions: { anthropic: { cacheControl: { type: "ephemeral" as const } } },
+  };
+}
+
+/**
+ * userメッセージ内の、項目単位（同じ生成呼び出し内のリトライ間）でのみ不変な
+ * text part用。systemメッセージにできない理由は、根拠チャンク自体はitemContextに
+ * 依存し呼び出しごとに変わるため（システムプロンプトは呼び出し全体を通じて完全に
+ * 不変な部分専用にしたい）。Anthropicではこのpart単位でもcache_controlが効く。
  */
 function cachedPrefix(text: string) {
   return {
@@ -498,15 +516,16 @@ export async function generateOneQuestion(
 
   // キャッシュを2段に分ける。
   // (1) universalInstructions: 科目・項目に一切依存しない、文字通り全呼び出し共通の
-  //     指示文。科目をまたいでも同一バイト列になるため、topUpAllSubjects/Cronのように
-  //     短時間に大量の生成が走る場面ではこのブロックだけでも複数科目間でキャッシュが効く
-  //     （OpenAI/Geminiの自動プレフィックスキャッシュはブロック単位でなく生の先頭バイト列で
-  //     一致判定するため、この後段に可変部分が続いても問題ない）。
+  //     指示文。systemメッセージとして送る（下のgenerateObject呼び出し参照）。
+  //     OpenAIの暗黙キャッシュは「最新（＝可変なuserメッセージ）の手前」に自動で
+  //     キャッシュ境界を置くため、systemメッセージとして分離することで初めて安定した
+  //     キャッシュ対象になる（以前はuserメッセージ内のtext partとして可変部分と
+  //     同居させており、境界が一致せずキャッシュされていなかった）。
   // (2) itemContext: 科目・項目・根拠チャンクに依存するが、同一項目に対する生成1〜2回目
-  //     （リトライ）の間では完全に同一バイト列になる部分。Anthropicは明示的なcache_control
-  //     が無いとキャッシュされず、かつブロック単位でキャッシュ境界を打つ必要があるため、
-  //     両方に別々にcache_controlを付けて、科目非依存の(1)と同一項目内の(2)それぞれで
-  //     キャッシュヒットの機会を最大化する。
+  //     （リトライ）の間では完全に同一バイト列になる部分。userメッセージ内のtext part。
+  //     Anthropicは明示的なcache_controlが無いとキャッシュされないため、(1)(2)双方に
+  //     cache_controlを付けて、科目非依存の(1)と同一項目内の(2)それぞれでキャッシュ
+  //     ヒットの機会を最大化する。
   const universalInstructions = `あなたは精神保健福祉士国家試験の作問委員です。教科書の記述のみを根拠に、本番と同水準の問題を1問作成してください。
 
 # 作問ルール
@@ -639,10 +658,10 @@ ${pastExcerpts.length ? pastExcerpts.map((e, i) => `${i + 1}. ${e}...`).join("\n
       // 先頭バイト列でもヒットしない（他プロバイダは未知のproviderOptionsを無視するだけ）
       providerOptions: { openai: { promptCacheKey: "quiz-generate-v1" } },
       prompt: [
+        systemCacheMessage(universalInstructions),
         {
           role: "user",
           content: [
-            cachedPrefix(universalInstructions),
             cachedPrefix(itemContext),
             { type: "text", text: variableSuffix + retryNote },
           ],
@@ -713,13 +732,10 @@ ${optionsList}
       schema: verifySchema,
       providerOptions: { openai: { promptCacheKey: "quiz-verify-v1" } },
       prompt: [
+        systemCacheMessage(verifyInstructions),
         {
           role: "user",
-          content: [
-            cachedPrefix(verifyInstructions),
-            cachedPrefix(verifyItemContext),
-            { type: "text", text: verifyTarget },
-          ],
+          content: [cachedPrefix(verifyItemContext), { type: "text", text: verifyTarget }],
         },
       ],
     });

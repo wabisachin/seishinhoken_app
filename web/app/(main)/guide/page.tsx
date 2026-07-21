@@ -100,6 +100,14 @@ export default function GuidePage() {
             出題傾向に近い分布になります。
           </GenStep>
           <CycleArrow />
+          <GenStep emoji="📚" title="実際の過去問を「お手本」として読み込ませる">
+            型が決まったら、その型に一致する実際の過去問を最大5問、問題文・選択肢・正答まで
+            そのままAIに見本として読み込ませます（同じ科目の過去問を優先し、数が足りない分だけ
+            他科目の同じ型の過去問で補います）。「事例形式で作ってください」という指示の言葉だけ
+            ではなく、「本番の問題は実際にこういう書き方・こういう言い回しをしている」という
+            具体例を毎回見せることで、文体や難易度が本番の過去問からずれにくくなります。
+          </GenStep>
+          <CycleArrow />
           <GenStep emoji="✍️" title="見つかった教科書の本文だけを根拠に、AIが問題を作成する">
             <p>
               このとき、AIには細かいルールを指示しています。実際の指示の一部を、わかりやすく言い換えると:
@@ -205,6 +213,27 @@ export default function GuidePage() {
       </section>
 
       <section className="rounded-2xl bg-white p-5 shadow-warm">
+        <h2 className="font-bold text-indigo-700">🎯 実戦模試について</h2>
+        <p className="mt-2 text-sm leading-relaxed text-stone-700">
+          科目別演習・全科目演習が「1問ずつ理解しながら進める」練習だとすると、実戦模試は
+          「本番でどれだけ通用するか」を測る場所です。共通84問（140分）・専門48問（90分）という
+          本番と同じ出題数・時間制限で解き、採点も総得点だけでなく、
+          <strong className="font-bold">9つの科目群すべてで最低1問正解しているか</strong>という本番の
+          合格基準をそのまま再現して判定します。「総得点は足りているのに、ある科目群がまるごと
+          ゼロ点で不合格」という、普段の演習だけでは気づきにくい失敗パターンに事前に気づけます
+          （詳しくは合格ガイドを参照）。
+        </p>
+        <p className="mt-2 text-sm leading-relaxed text-stone-700">
+          出題される問題は、科目別演習・全科目演習とは別に用意された実戦模試専用の問題プールから
+          選ばれます（そのため実戦模試を受けても、科目別演習側の200問の上限には影響しません）。
+          一方で、<strong className="font-bold">間違えた問題は科目別演習・全科目演習と同じように
+          自動的に復習の対象になり</strong>、克服して2週間経てば想起の庭にも巡ってきます。実戦模試だけを
+          特別扱いして復習から切り離す、ということはしていません。ペース管理のため、受験は月5回までに
+          制限しています。
+        </p>
+      </section>
+
+      <section className="rounded-2xl bg-white p-5 shadow-warm">
         <h2 className="font-bold text-emerald-700">🌱 想起の庭について</h2>
         <p className="mt-2 text-sm leading-relaxed text-stone-700">
           間違えた問題は、同じ問題で正解すると「克服」したとみなされ、復習の対象から
@@ -245,7 +274,7 @@ export default function GuidePage() {
           <RankStep n={6} condition="間違えたまま残っている問題が多い苦手科目トップ3がある" action="科目別演習、または復習モード" note="判断材料が十分なら復習モード、不足していれば科目別演習を優先。ただし復習が60問以上溜まっていれば判断材料が少なくても復習モードを優先" />
           <RankStep n={7} condition="他の科目に比べて演習量が相対的に少なめの科目がある" action="1〜2件程度なら最も演習量が少ない科目を科目別演習、3件以上と広範囲なら全科目演習" />
           <RankStep n={8} condition="実戦模試を受けられる状況（月内のペース配分も考慮）" action="実戦模試で力試し" />
-          <RankStep n={9} condition="上記のいずれにも当てはまらない" action="全科目演習を継続" isLast />
+          <RankStep n={9} condition="上記のいずれにも当てはまらない" action="全科目演習を継続" />
         </div>
         <p className="mt-3 text-xs leading-relaxed text-stone-400">
           実際の判断はAIが行い、上記の考え方を基本の軸にしつつ、学習プランの遅れ具合などその場の状況も
@@ -364,20 +393,18 @@ function RankStep({
   condition,
   action,
   note,
-  isLast,
 }: {
   n: number;
   condition: string;
   action: string;
   note?: string;
-  isLast?: boolean;
 }) {
   return (
     <div className="flex gap-3">
       <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold text-white">
         {n}
       </div>
-      <div className={`flex-1 pb-3 ${isLast ? "" : "border-b border-stone-100"}`}>
+      <div className="flex-1 pb-3">
         <p className="text-sm text-stone-700">{condition}</p>
         <p className="mt-1 text-xs font-medium text-indigo-600">→ {action}</p>
         {note && <p className="mt-0.5 text-xs text-stone-400">{note}</p>}

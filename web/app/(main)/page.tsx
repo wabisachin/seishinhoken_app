@@ -152,6 +152,7 @@ function isDataThin(s: ReviewSubject, medianTotal: number): boolean {
 
 function WeaknessRow({ s, medianTotal }: { s: ReviewSubject; medianTotal: number }) {
   const [showDetail, setShowDetail] = useState(false);
+  const [showModeChoice, setShowModeChoice] = useState(false);
   const category = categorize(s);
   const thin = isDataThin(s, medianTotal);
   const cleared = Math.max(0, s.everMissed - s.wrongCount);
@@ -197,17 +198,13 @@ function WeaknessRow({ s, medianTotal }: { s: ReviewSubject; medianTotal: number
       <span className="shrink-0 whitespace-nowrap rounded-full bg-green-100 px-2 py-0.5 text-xs font-bold text-green-700">OK</span>
     );
 
-  // 解答数が少ない科目(thin)は、間違えたまま残っている問題があっても復習ではなく
-  // 科目別演習に誘導する。解答数が少ないうちは、既知の間違いを復習することより
-  // まず母数を増やしてまだ見つかっていない弱点を洗い出すことを優先すべきため
-  // （既知の弱点バッジ自体はそのまま表示し、事実は隠さない）
-  const goReview = category === "needsReview" && !thin;
-  const clickable = !(category === "confidentOk" && !thin);
-  const linkHref = goReview
-    ? `/quiz?mode=review&subject=${encodeURIComponent(s.subject)}`
-    : `/quiz?mode=subject&subject=${encodeURIComponent(s.subject)}`;
+  const subjectQuery = encodeURIComponent(s.subject);
+  // 「解答数が少ない・間違いが多い」という状況からどちらのモードが向いているかは
+  // 目安に過ぎず、最終的にどちらで始めるかはユーザー自身に選ばせる（タップすると
+  // 下に選択肢が開く）。復習モードは、復習する問題が実際に無ければ意味が無いため
+  // wrongCount>0のときだけ選択肢に出す
 
-  // 詳細ボタンは、科目行全体を包むLinkの「外」に置く（兄弟要素にする）。以前はLink(<a>)の
+  // 詳細ボタンは、科目行全体を包むボタンの「外」に置く（兄弟要素にする）。以前はLink(<a>)の
   // 内側にbuttonを入れ子にしており、HTML的に無効な構造（インタラクティブ要素の中に
   // インタラクティブ要素）だったため、特にタッチ環境でボタン側のタップがLinkのクリックとして
   // 誤判定され、詳細を見たいだけなのに演習が始まってしまう不具合の原因になっていた
@@ -233,20 +230,19 @@ function WeaknessRow({ s, medianTotal }: { s: ReviewSubject; medianTotal: number
   const row = (
     <div
       className={`flex items-center gap-3 rounded-xl p-2.5 transition-colors ${
-        clickable
-          ? "bg-white shadow-warm-sm hover:bg-indigo-50"
-          : isPerfect
-            ? "bg-gradient-to-r from-amber-50 via-yellow-50 to-amber-50 shadow-warm-sm"
-            : "opacity-50"
+        isPerfect ? "bg-gradient-to-r from-amber-50 via-yellow-50 to-amber-50 shadow-warm-sm" : "bg-white shadow-warm-sm hover:bg-indigo-50"
       }`}
     >
-      {clickable ? (
-        <Link href={linkHref} className="flex min-w-0 flex-1 items-center gap-2">
-          {linkContent}
-        </Link>
-      ) : (
-        <div className="flex min-w-0 flex-1 items-center gap-2">{linkContent}</div>
-      )}
+      {/* タップすると、下に「科目別演習」「復習モード」の選択肢を開く。以前はここで
+          自動的にどちらかへ直接遷移させていたが、判定はあくまで目安であり、実際に
+          どちらで始めるかはユーザー自身に選ばせる方が意図に合う */}
+      <button
+        type="button"
+        onClick={() => setShowModeChoice((v) => !v)}
+        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+      >
+        {linkContent}
+      </button>
       {/* 詳細ボタン。以前は「解答数が薄い」の！マークと別に並んでいて紛らわしく
           誤タップも招いていたため1つに統合した。薄い場合は黄色で目立たせつつ、
           押すと詳細（解答数・克服数・薄いことの説明）が開く、という一貫した動作にする。
@@ -268,6 +264,24 @@ function WeaknessRow({ s, medianTotal }: { s: ReviewSubject; medianTotal: number
   return (
     <div>
       {row}
+      {showModeChoice && (
+        <div className="mt-1 flex flex-wrap gap-2">
+          <Link
+            href={`/quiz?mode=subject&subject=${subjectQuery}`}
+            className="min-h-9 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-700"
+          >
+            📝 科目別演習で始める
+          </Link>
+          {s.wrongCount > 0 && (
+            <Link
+              href={`/quiz?mode=review&subject=${subjectQuery}`}
+              className="min-h-9 rounded-lg border border-amber-500 px-3 py-1.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-50"
+            >
+              🔁 復習モードで始める（残り{s.wrongCount}問）
+            </Link>
+          )}
+        </div>
+      )}
       {showDetail && (
         <div className="mt-1 space-y-0.5 rounded-lg bg-stone-50 p-2 text-xs leading-relaxed text-stone-600">
           <p>問題数: {s.total}問</p>
