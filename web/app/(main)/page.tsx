@@ -616,9 +616,9 @@ export default function Dashboard() {
         </section>
       )}
 
-      {/* 弱点ゼロまで */}
+      {/* 弱点の克服状況 */}
       <section className="rounded-2xl bg-white p-5 shadow-warm">
-        <h2 className="mb-3 font-bold text-indigo-700">弱点ゼロまで</h2>
+        <h2 className="mb-3 font-bold text-indigo-700">弱点の克服状況</h2>
         {consumedPercent === null ? (
           <p className="text-sm text-stone-600">
             まだ間違えた問題がありません。科目別演習や全科目演習に取り組むと、ここに弱点克服の進み具合が表示されます。

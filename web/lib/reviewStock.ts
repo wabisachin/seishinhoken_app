@@ -80,7 +80,7 @@ export async function computeWrongStock(profile: string): Promise<Map<number, Wr
 }
 
 /**
- * ホーム画面の「弱点ゼロまで」進捗リング用。一度でも間違えたことがある問題の総数
+ * ホーム画面の「弱点の克服状況」進捗リング用。一度でも間違えたことがある問題の総数
  * (everMissed)と、そのうち今も弱点ストックに残っている数(currentWrong)を返す。
  * 消化率 = (everMissed - currentWrong) / everMissed で「これまで間違えた問題のうち
  * 克服できた割合」を表す（everMissedが増え続ける指標のため、0%からではなく
