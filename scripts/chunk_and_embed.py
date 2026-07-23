@@ -122,8 +122,20 @@ def main() -> None:
         existing = sb.table("past_questions").select("id", count="exact").limit(1).execute()
         if (existing.count or 0) == 0:
             rows = json.loads(pq_path.read_text(encoding="utf-8"))
+            # exam_roundはsource_file（例: "reiwa_06/se_pm_01_27.pdf" → 27,
+            # "reiwa_06/sp_am_01_37.pdf" → 37）の末尾の数字から導出する。専門科目と
+            # 共通科目で採番体系が異なる（同じ回でも専門27=共通37等）ため、科目名からの
+            # 推測ではなくファイル名の末尾番号をそのまま使う。以前はここが28固定になって
+            # おり、本番DBには正しい値が別途手作業で入っていたため実害は無かったが、
+            # このスクリプトから再投入する経路では常に誤った値になる不具合だった
+            round_re = re.compile(r"_(\d+)\.pdf$")
+            def derive_exam_round(source_file: str | None) -> int | None:
+                if not source_file:
+                    return None
+                m = round_re.search(source_file)
+                return int(m.group(1)) if m else None
             payload = [{
-                "exam_round": 28,
+                "exam_round": derive_exam_round(q.get("source_file")),
                 "kind": q["kind"],
                 "subject": q["subject"],
                 "number": q["number"],

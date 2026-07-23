@@ -30,7 +30,7 @@ export function estimateCostUsd(
 
 /** トークン使用量を記録する。失敗してもLLM呼び出し自体は止めたくないので例外は投げない */
 export async function logUsage(params: {
-  source: "hyde" | "generate" | "verify" | "next-action" | "report-analyze" | "report-write" | "plan-allocate";
+  source: "hyde" | "generate" | "verify" | "next-action" | "report-analyze" | "report-write" | "plan-allocate" | "past-question-explain";
   subject?: string;
   provider: string;
   model: string;
